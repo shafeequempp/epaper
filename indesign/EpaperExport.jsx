@@ -32,6 +32,26 @@
  */
 #target indesign
 
+/*
+ * Batch (no-dialog) mode:
+ * When this script is run with app.doScript(code, JAVASCRIPT, [folder, date, upload, publish])
+ * — as the epaper-run.vbs launcher does — these arrive as the script-level arguments and the
+ * dialog is skipped. Double-clicking it in the Scripts panel passes none, so the dialog shows.
+ */
+var EPAPER_BATCH = null;
+try {
+    if (typeof arguments !== "undefined" && arguments.length) {
+        var _u = String(arguments[2] || "").toLowerCase();
+        var _p = String(arguments[3] || "").toLowerCase();
+        EPAPER_BATCH = {
+            folder:  String(arguments[0] || ""),
+            date:    String(arguments[1] || ""),
+            upload:  _u !== "" && _u !== "noupload" && _u !== "0" && _u !== "false",
+            publish: _p === "publish" || _p === "1" || _p === "true"
+        };
+    }
+} catch (e_batch) { EPAPER_BATCH = null; }
+
 (function () {
     var CONFIG = {
         resolution: 200,          // page JPEG dpi (200 is sharp enough for zoom; 150 = smaller files)
@@ -48,7 +68,7 @@
         // WAMP:       "http://localhost/epaper/api/import.php"
         // Production: "https://<your-server>/epaper/api/import.php"
         uploadUrl: "http://localhost/epaper/api/import.php",
-        apiKey: "",               // must match 'api_key' in config.php; empty = upload switched off
+        apiKey: "442cccc1a38d29c40acf00fbce22482368ec6c002a93d5bb", // must match 'api_key' in config.php; empty = upload switched off
         curl: "curl.exe"          // built into Windows 10/11; on a Mac "curl" is used
     };
 
@@ -56,9 +76,17 @@
     var logLines = [];
     function log(line) { logLines.push(line); }
 
-    var opts = showDialog();
+    var opts = (EPAPER_BATCH && EPAPER_BATCH.folder) ? optsFromBatch(EPAPER_BATCH) : showDialog();
     if (!opts) return;
     run(opts);
+
+    // Build run options from the launcher's arguments, with no dialog.
+    function optsFromBatch(a) {
+        var f = new Folder(a.folder);
+        if (!f.exists) { alert("ePaper: that folder does not exist:\n" + a.folder); return null; }
+        var date = /^\d{4}-\d{2}-\d{2}$/.test(a.date) ? a.date : isoToday();
+        return { mode: "folder", folder: f, date: date, upload: a.upload, publish: a.publish, batch: true };
+    }
 
     // ================================================================ dialog
 
@@ -204,6 +232,7 @@
         };
         var perPage = [], failed = [], failedKeys = {}, emptyPages = [], seen = {}, totalArticles = 0;
         var codes = [];
+        var fontMissing = {};   // fonts InDesign could not find on this PC (collected across all pages)
 
         var bar = progress(items.length + (opts.upload ? 1 : 0));
         var oldUI = app.scriptPreferences.userInteractionLevel;
@@ -227,6 +256,11 @@
                     }
                     log("");
                     log("== " + it.name + ": edition " + it.info.code + ", page " + it.info.page + ", " + issueDate);
+                    var fiss = fontIssues(doc);
+                    for (var fx = 0; fx < fiss.length; fx++) {
+                        fontMissing[fiss[fx]] = true;
+                        log("FONT MISSING in " + it.name + ": " + fiss[fx]);
+                    }
                     var res = exportDocument(outDir, it.info, issueDate);
                     for (var m = 0; m < res.missing.length; m++) combined.missing_links.push(it.name + ": " + res.missing[m]);
 
@@ -279,6 +313,9 @@
         if (failed.length) msg += "\n\nCOULD NOT EXPORT " + failed.length + " file(s):\n" + failed.slice(0, 6).join("\n");
         if (emptyPages.length) msg += "\n\nNO ARTICLES FOUND in: " + emptyPages.slice(0, 6).join(", ");
         if (combined.missing_links.length) msg += "\n\n" + combined.missing_links.length + " missing linked image(s); those pages use low-resolution previews.";
+        var fontList = [];
+        for (var fkey in fontMissing) { if (fontMissing.hasOwnProperty(fkey)) fontList.push(fkey); }
+        if (fontList.length) msg += "\n\nMISSING FONTS (" + fontList.length + ") - headlines/text may look wrong until these are installed on THIS PC:\n" + fontList.slice(0, 12).join("\n");
         if (upload) {
             msg += "\n\nUploaded " + upload.ok + " of " + perPage.length + " page(s), " + upload.articles + " article(s) saved.";
             for (var e = 0; e < upload.editions.length && e < 12; e++) msg += "\n  " + upload.editions[e];
@@ -288,7 +325,7 @@
         }
         msg += "\n\nDetails: export_log.txt";
         alert(msg);
-        outDir.execute();
+        if (!opts.batch) outDir.execute();   // don't pop Explorer during an unattended batch run
     }
 
     // ================================================================ file names and dates
@@ -315,6 +352,24 @@
         if (!best) best = d0;
         function z(n) { return (n < 10 ? "0" : "") + n; }
         return best.getFullYear() + "-" + z(best.getMonth() + 1) + "-" + z(best.getDate());
+    }
+
+    // Fonts the current PC does not have, so InDesign substituted them (text/headlines
+    // will render with the wrong glyphs). Returns ["Family Style [missing|substituted]", ...].
+    function fontIssues(doc) {
+        var out = [];
+        try {
+            for (var i = 0; i < doc.fonts.length; i++) {
+                var fnt = doc.fonts[i], st = null;
+                try { st = fnt.status; } catch (e1) { st = null; }
+                if (st == FontStatus.NOT_AVAILABLE || st == FontStatus.SUBSTITUTED) {
+                    var nm = "";
+                    try { nm = String(fnt.name).replace(/\t/g, " "); } catch (e2) { nm = "(unnamed font)"; }
+                    out.push(nm + (st == FontStatus.NOT_AVAILABLE ? " [missing]" : " [substituted]"));
+                }
+            }
+        } catch (e3) {}
+        return out;
     }
 
     // ================================================================ one document
@@ -546,6 +601,12 @@
 
     function tomorrow() {
         var d = new Date(new Date().getTime() + 86400000);
+        function z(n) { return (n < 10 ? "0" : "") + n; }
+        return d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate());
+    }
+
+    function isoToday() {
+        var d = new Date();
         function z(n) { return (n < 10 ? "0" : "") + n; }
         return d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate());
     }

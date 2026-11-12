@@ -29,7 +29,7 @@ return [
     ],
     // Secret shared with EpaperExport.jsx (apiKey) so InDesign can upload pages directly.
     // Use a long random value, e.g. from https://www.random.org/strings/ ; empty = switched off.
-    'api_key'      => '',
+    'api_key'      => '442cccc1a38d29c40acf00fbce22482368ec6c002a93d5bb',
 
     // ---- Reader subscriptions & paywall ----
     'paywall' => [

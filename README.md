@@ -72,6 +72,27 @@ The script opens each file without showing it, exports it, closes it without sav
 
 **If upload fails**, the summary says why: wrong API key, unknown edition code, a shared code it could not settle, a file too large (raise `upload_max_filesize` / `post_max_size`), or the dashboard could not be reached (check `uploadUrl`). The exported `manifest.json` and JPGs stay in the folder; uploading them on the **Upload pages** screen uses the same codes and dates.
 
+## One-click upload (double-click a .bat)
+
+For the simplest daily routine, there's a launcher that opens InDesign, exports **every `.indd` in a folder**, and uploads the pages with **today's date** — no dialog. Editions are read from the file names (`12pg2wd` → Wayanad), and the pages land in the dashboard as drafts for an editor to review and **Publish**.
+
+**One-time setup**
+1. `config.php` → `api_key` must be set (it already is), and the same value must be in `indesign/EpaperExport.jsx` (`apiKey`). They're kept in sync.
+2. The driver `indesign/epaper-run.vbs` and `indesign/EpaperExport.jsx` must stay together in `C:\wamp64\www\epaper\indesign\`. If you install the app elsewhere, open `indesign/epaper-upload.bat` and fix the `DRIVER=` path at the top.
+
+**Every day**
+1. Name the files to the pattern `<day>pg<page><code>…` (e.g. `12pg4wd-Sports.indd`) so each page is recognised.
+2. Copy `indesign/epaper-upload.bat` into the folder that holds that day's `.indd` files (the one with the `Links` subfolder).
+3. **Double-click `epaper-upload.bat`.** A small window shows progress; InDesign opens each file hidden, exports it, and uploads it. When it says *Finished*, open `http://localhost/epaper/admin/` to review and publish.
+
+Notes:
+- It uploads but never auto-publishes — an editor always reviews first.
+- Today's date is the base; the day in each file name decides the exact issue date (so running on the 12th with `12pg…` files = the 12th).
+- Files whose names don't match the pattern are skipped and listed in `_epaper_<date>\export_log.txt`.
+- Links must be reachable from this PC (packaged in `Links`, or the original G:/L:/S: drives). Missing images export at low resolution.
+- **Fonts must be installed on this PC.** If a font is missing, InDesign substitutes it and that text (often a headline) exports with the wrong glyphs. The run does not stop for it — instead it lists every missing font in the summary and in `_epaper_<date>\export_log.txt` (lines starting `FONT MISSING`). Install those fonts on this PC (or drop the font files into a `Document Fonts` folder next to the `.indd` files, which InDesign activates automatically) and run again.
+- To run it by hand instead: `cscript //nologo "C:\wamp64\www\epaper\indesign\epaper-run.vbs" "C:\path\to\the\indd\folder"`.
+
 ## Daily use (manual upload)
 
 1. Export each page from InDesign.
@@ -99,6 +120,8 @@ Editors can add `&preview=1` to see unpublished issues while signed in.
 
 ```
 indesign/EpaperExport.jsx   InDesign export script
+indesign/epaper-run.vbs     launcher: drives InDesign to export+upload a folder (today's date)
+indesign/epaper-upload.bat  copy into a page folder and double-click for one-click upload
 sql/schema.sql              database tables
 sql/editions_seed.sql       the 125 editions, codes, groups, common-page links (safe to re-run)
 sql/upgrade_editions.sql    one-time upgrade for databases made with the earlier schema
