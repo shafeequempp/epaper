@@ -1,0 +1,121 @@
+<?php
+declare(strict_types=1);
+require __DIR__ . '/../inc/bootstrap.php';
+require __DIR__ . '/../inc/admin_layout.php';
+
+require_login('admin');
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    check_csrf();
+    $action = (string)($_POST['action'] ?? '');
+    $id = (int)($_POST['id'] ?? 0);
+    $who = q('SELECT * FROM subscribers WHERE id = ?', [$id])->fetch();
+
+    if (!$who) {
+        flash('Subscriber not found.', 'error');
+    } elseif ($action === 'block') {
+        q("UPDATE subscribers SET status = 'blocked' WHERE id = ?", [$id]);
+        flash('Account blocked.');
+    } elseif ($action === 'unblock') {
+        q("UPDATE subscribers SET status = 'active' WHERE id = ?", [$id]);
+        flash('Account unblocked.');
+    } elseif ($action === 'grant') {
+        $planId = (int)($_POST['plan_id'] ?? 0);
+        $days = (int)($_POST['days'] ?? 0);
+        $plan = q('SELECT id FROM plans WHERE id = ?', [$planId])->fetch();
+        if (!$plan) {
+            flash('Choose a plan to record the grant against.', 'error');
+        } else {
+            $end = $days > 0 ? (new DateTime())->modify("+$days days")->format('Y-m-d H:i:s') : null;
+            q("INSERT INTO subscriptions (subscriber_id, plan_id, status, current_start, current_end, source, note)
+               VALUES (?, ?, 'manual', NOW(), ?, 'manual', ?)",
+              [$id, $planId, $end, trim((string)($_POST['note'] ?? 'Granted by admin'))]);
+            flash($days > 0 ? "Granted $days days of access." : 'Granted indefinite access.');
+        }
+    } elseif ($action === 'revoke') {
+        q("UPDATE subscriptions SET status = 'cancelled', current_end = NOW()
+           WHERE subscriber_id = ? AND source = 'manual'
+             AND status = 'manual' AND (current_end IS NULL OR current_end > NOW())", [$id]);
+        flash('Manual access revoked.');
+    }
+    $q = trim((string)($_GET['q'] ?? ''));
+    redirect(url('admin/subscribers.php', $q !== '' ? ['q' => $q] : []));
+}
+
+$search = trim((string)($_GET['q'] ?? ''));
+if ($search !== '') {
+    $like = '%' . addcslashes($search, '%_\\') . '%';
+    $subs = q('SELECT * FROM subscribers WHERE email LIKE ? OR name LIKE ? ORDER BY created_at DESC LIMIT 200', [$like, $like])->fetchAll();
+} else {
+    $subs = q('SELECT * FROM subscribers ORDER BY created_at DESC LIMIT 200')->fetchAll();
+}
+$plans = q('SELECT id, name FROM plans ORDER BY sort_order')->fetchAll();
+$total = (int)q('SELECT COUNT(*) FROM subscribers')->fetchColumn();
+$activeCount = (int)q("SELECT COUNT(DISTINCT subscriber_id) FROM subscriptions
+    WHERE (status IN ('active','authenticated') AND current_end > NOW())
+       OR (source='manual' AND (current_end IS NULL OR current_end > NOW()))")->fetchColumn();
+
+admin_header('Subscribers', 'subscribers');
+?>
+<h1>Subscribers</h1>
+<p class="a-muted"><?= $total ?> accounts · <?= $activeCount ?> with active access</p>
+
+<form method="get" class="a-inline" style="margin-bottom:1rem">
+  <input name="q" value="<?= h($search) ?>" placeholder="Search e-mail or name">
+  <button class="a-btn">Search</button>
+  <?php if ($search !== ''): ?><a class="a-link" href="<?= h(url('admin/subscribers.php')) ?>">Clear</a><?php endif; ?>
+</form>
+
+<table class="a-table">
+  <thead><tr><th>Name / e-mail</th><th>Joined</th><th>Verified</th><th>Access</th><th>Actions</th></tr></thead>
+  <tbody>
+  <?php foreach ($subs as $s): $act = active_subscription((int)$s['id']); ?>
+    <tr>
+      <td>
+        <strong><?= h($s['name'] ?: '—') ?></strong>
+        <?php if ($s['status'] === 'blocked'): ?><span class="a-badge a-badge--off">blocked</span><?php endif; ?>
+        <br><span class="a-muted"><?= h($s['email']) ?></span>
+      </td>
+      <td><?= h(date('j M Y', strtotime($s['created_at']))) ?></td>
+      <td><?= $s['email_verified_at'] ? 'Yes' : '<span class="a-muted">No</span>' ?></td>
+      <td>
+        <?php if ($act): ?>
+          <strong><?= h($act['plan_name']) ?></strong>
+          <?= $act['source'] === 'manual' ? '<span class="a-muted">(manual)</span>' : '' ?><br>
+          <span class="a-muted"><?= !empty($act['current_end']) ? 'until ' . h(date('j M Y', strtotime($act['current_end']))) : 'no expiry' ?><?= $act['cancel_at_period_end'] ? ', not renewing' : '' ?></span>
+        <?php else: ?>
+          <span class="a-muted">none</span>
+        <?php endif; ?>
+      </td>
+      <td class="a-actions">
+        <details>
+          <summary class="a-link">Manage</summary>
+          <div class="a-pop">
+            <form method="post" class="a-row">
+              <?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+              <label>Plan
+                <select name="plan_id"><?php foreach ($plans as $pl): ?><option value="<?= (int)$pl['id'] ?>"><?= h($pl['name']) ?></option><?php endforeach; ?></select>
+              </label>
+              <label>Days (0 = no expiry) <input name="days" type="number" min="0" value="30" style="width:6rem"></label>
+              <label style="flex-basis:100%">Note <input name="note" placeholder="Complimentary"></label>
+              <button class="a-btn" name="action" value="grant">Grant access</button>
+            </form>
+            <form method="post" class="a-inline"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+              <button class="a-link" name="action" value="revoke" onclick="return confirm('Revoke manual access?')">Revoke manual access</button>
+            </form>
+            <form method="post" class="a-inline"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+              <?php if ($s['status'] === 'blocked'): ?>
+                <button class="a-link" name="action" value="unblock">Unblock account</button>
+              <?php else: ?>
+                <button class="a-link" name="action" value="block" onclick="return confirm('Block this account? They won\'t be able to sign in.')">Block account</button>
+              <?php endif; ?>
+            </form>
+          </div>
+        </details>
+      </td>
+    </tr>
+  <?php endforeach; ?>
+  <?php if (!$subs): ?><tr><td colspan="5" class="a-muted">No subscribers<?= $search !== '' ? ' match that search' : ' yet' ?>.</td></tr><?php endif; ?>
+  </tbody>
+</table>
+<?php admin_footer();
