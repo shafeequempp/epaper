@@ -31,4 +31,5 @@ echo json_encode([
         return ['src' => media($r['img']), 'w' => (int)$r['img_width'], 'h' => (int)$r['img_height']];
     }, $a['regions']),
     'url'      => url('article.php', array_filter(['id' => $a['id'], 'preview' => can_preview() ? 1 : null])),
+    'download' => ($a['regions'] && can_download_article($a)) ? url('dl_article.php', ['id' => $a['id']]) : '',
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

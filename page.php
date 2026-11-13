@@ -5,6 +5,7 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/reader.php';
 require __DIR__ . '/inc/reader_layout.php';
 
+reader_gate();
 $ctx = resolve_issue();
 $pages = $ctx['issue'] ? edition_pages($ctx) : [];
 $want = (int)($_GET['p'] ?? 0);
@@ -43,11 +44,6 @@ if (!$page) {
       <button class="tool" type="button" data-zoom="out" aria-label="Zoom out">−</button>
       <button class="tool" type="button" data-zoom="fit">Fit</button>
       <button class="tool" type="button" data-zoom="in" aria-label="Zoom in">+</button>
-      <?php if (can_download_ctx($ctx)): ?>
-        <a class="tool" href="<?= h(media($page['img_full'])) ?>" download>Download page</a>
-      <?php else: ?>
-        <a class="tool" href="<?= h(url('subscribe.php')) ?>" title="Subscribe to download pages">Download page</a>
-      <?php endif; ?>
     </div>
 
     <?php if ($prev): ?>
@@ -80,6 +76,7 @@ if (!$page) {
         <button type="button" data-mode="image" aria-pressed="true">As printed</button>
         <button type="button" data-mode="text" aria-pressed="false">Text</button>
       </div>
+      <a class="panel__dl" href="#" hidden>Download image</a>
       <a class="panel__open" href="#" target="_blank" rel="noopener">Open article</a>
       <button type="button" class="panel__close" aria-label="Close article">×</button>
     </div>

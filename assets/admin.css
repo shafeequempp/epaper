@@ -114,3 +114,29 @@ details > summary.a-link { display: inline; }
 tr.is-hidden td { color: var(--ink-soft); }
 .a-editions-wrap { margin-bottom: 16px; }
 .a-editions-wrap summary { cursor: pointer; color: var(--ink-soft); margin-bottom: 8px; }
+
+/* ---- Issues grouped by date + district (collapsible rows) ---------------- */
+.a-btn--sm { padding: 4px 12px; font-size: 14px; }
+.a-status--partial { background: #FBEFD3; color: #8a5a00; }
+.a-tag { text-transform: capitalize; }
+.a-tag--main { background: #DDE7F7; color: #1b4b8a; }
+.a-tag--supplement { background: #EAD9F2; color: #6b2b8a; }
+.a-tag--local { background: #E6E9EC; color: var(--ink-soft); }
+
+.a-issues .a-grow { cursor: pointer; }
+.a-issues .a-grow:hover { background: #F5F6F7; }
+.a-issues .a-grow:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.a-grow__caret { width: 1em; color: var(--ink-soft); transition: transform .12s ease; }
+.a-issues .a-grow.is-open .a-grow__caret { transform: rotate(90deg); }
+
+.a-gdetail > td { background: #FAFBFC; padding: 0 14px 10px 14px; border-bottom: 1px solid var(--line); }
+.a-subtable { width: 100%; border-collapse: collapse; margin: 6px 0 10px; background: var(--card); border: 1px solid var(--line); }
+.a-subtable th, .a-subtable td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.a-subtable th { color: var(--ink-soft); font-weight: 600; background: #F5F6F7; }
+.a-subtable tr:last-child td { border-bottom: 0; }
+
+/* ---- per-subscription items in the Subscribers table --------------------- */
+.a-sub-item { padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.a-sub-item:last-child { border-bottom: 0; }
+.a-sub-item__acts { margin-top: 2px; display: flex; gap: 12px; }
+.a-sub-item__acts .a-link { font-size: 13px; }

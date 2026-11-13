@@ -374,3 +374,7 @@ button.cal__day:hover { background: var(--red-wash); color: var(--red); }
 .cal__day.is-off { font-weight: 400; color: #B8BFC6; cursor: default; }
 .cal__note { margin: 8px 0 0; font-size: 13px; color: var(--ink-soft); }
 @media (max-width: 760px) { .cal { width: min(300px, calc(100vw - 24px)); } }
+/* Download-image button in the article view */
+.story__dl { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; font-weight: 600; color: var(--red, #C4161C); text-decoration: none; }
+.story__dl svg { width: 18px; height: 18px; }
+.story__dl:hover { text-decoration: underline; }

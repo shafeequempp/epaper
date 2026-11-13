@@ -14,6 +14,18 @@ function can_preview(): bool
 }
 
 /**
+ * The paper is for signed-in readers. When the paywall is on, a visitor who is not signed in
+ * (and is not staff previewing) is sent to the landing page instead of the reader.
+ */
+function reader_gate(): void
+{
+    if (!paywall_enabled() || can_preview() || current_subscriber() !== null) {
+        return;
+    }
+    redirect(url('home.php'));
+}
+
+/**
  * Resolves edition + date from the query string, falling back to the first edition
  * and its latest date. A date counts when the edition, or an edition it takes pages
  * from (its main edition), has a published issue that day.
@@ -63,33 +75,96 @@ function resolve_issue(): array
 }
 
 /**
- * Pages for the chosen edition and date: its own pages, then for each page number it lacks,
- * the page from the edition it takes pages from (e.g. Ernakulam for Kothamangalam-Muvattupuzha).
- * Inherited pages carry 'from_edition'.
+ * Every page of the group for the issue date, indexed by edition and page number, plus
+ * who "owns" each page number. A page number that only ONE edition in the group has is a
+ * COMMON page (part of the shared paper); a page number that TWO OR MORE editions each
+ * have their own file for (e.g. page 11) is a LOCAL page that differs per edition.
+ *
+ * Returns ['pages' => [editionId => [n => pageRow]], 'owners' => [n => [editionId,...]],
+ *          'eds' => [editionId => editionRow]].
+ */
+function group_page_map(array $ctx): array
+{
+    $out = ['pages' => [], 'owners' => [], 'eds' => []];
+    if (empty($ctx['issue']) || empty($ctx['group_editions'])) {
+        return $out;
+    }
+    $date = $ctx['issue']['issue_date'];
+    $statusSql = can_preview() ? '' : "AND i.status = 'published'";
+    foreach ($ctx['group_editions'] as $ge) {
+        $gid = (int)$ge['id'];
+        $out['eds'][$gid] = $ge;
+        $rows = q("SELECT p.* FROM pages p JOIN issues i ON i.id = p.issue_id
+                   WHERE i.edition_id = ? AND i.issue_date = ? $statusSql ORDER BY p.page_number",
+                  [$gid, $date])->fetchAll();
+        foreach ($rows as $p) {
+            $n = (int)$p['page_number'];
+            $out['pages'][$gid][$n] = $p;
+            $out['owners'][$n][] = $gid;
+        }
+    }
+    return $out;
+}
+
+/** A page number is "local" when two or more editions in the group each have their own. */
+function page_is_local(array $owners, int $n): bool
+{
+    return isset($owners[$n]) && count(array_unique($owners[$n])) >= 2;
+}
+
+/**
+ * Pages shown when reading one edition, as a full paper:
+ *   - COMMON pages (only one edition in the group has that number) are part of the shared
+ *     paper and show for every edition — so the main edition shows all of them.
+ *   - a LOCAL page (several editions each have their own, e.g. page 11) shows the reading
+ *     edition's OWN version when it has one, otherwise the main edition's.
+ * This way the main edition shows the whole paper and each sub-edition shows the same
+ * paper with only its own differing page(s) swapped in — no matter which file-name code
+ * the pages were uploaded under.
  */
 function edition_pages(array $ctx): array
 {
     if (!$ctx['issue']) {
         return [];
     }
-    $statusSql = can_preview() ? '' : "AND i.status = 'published'";
-    // Where to pull pages from, in priority order (first edition with a given page
-    // number wins). A sub-edition borrows its main's pages (the chain). A main
-    // edition shows its own pages, then fills any page number it lacks from its
-    // group's sub-editions — so a date that exists only under a sub-edition still
-    // renders when the reader is on the main edition.
-    $sources = $ctx['chain'];
-    $cur = $ctx['edition'];
-    if (!empty($cur['is_main']) && !empty($ctx['group_editions'])) {
-        $sources = [$cur];
-        foreach ($ctx['group_editions'] as $ge) {
-            if ((int)$ge['id'] !== (int)$cur['id']) {
-                $sources[] = $ge;
-            }
+    if (empty($ctx['group_editions'])) {
+        return edition_pages_chain($ctx);   // standalone edition: old inherit-chain behaviour
+    }
+
+    $map        = group_page_map($ctx);
+    $owners     = $map['owners'];
+    $pagesByEd  = $map['pages'];
+    $eds        = $map['eds'];
+    $curId      = (int)$ctx['edition']['id'];
+    $mainId     = (int)($ctx['main_edition']['id'] ?? $curId);
+
+    $result = [];
+    foreach ($owners as $n => $ownerIds) {
+        $local = page_is_local($owners, $n);
+        $srcId = null;
+        if ($local && isset($pagesByEd[$curId][$n])) {
+            $srcId = $curId;                                   // my own local page
+        } elseif ($local && isset($pagesByEd[$mainId][$n])) {
+            $srcId = $mainId;                                  // main's version of a local page
+        } else {
+            $srcId = $ownerIds[0];                             // the common page's single owner
+        }
+        if (isset($pagesByEd[$srcId][$n])) {
+            $p = $pagesByEd[$srcId][$n];
+            $p['from_edition'] = $srcId === $curId ? null : ($eds[$srcId]['name'] ?? null);
+            $result[$n] = $p;
         }
     }
+    ksort($result);
+    return array_values($result);
+}
+
+/** Old behaviour for an edition with no group: own pages, then fill gaps from its chain. */
+function edition_pages_chain(array $ctx): array
+{
+    $statusSql = can_preview() ? '' : "AND i.status = 'published'";
     $byNumber = [];
-    foreach ($sources as $level => $ed) {
+    foreach ($ctx['chain'] as $level => $ed) {
         $rows = q("SELECT p.* FROM pages p JOIN issues i ON i.id = p.issue_id
                    WHERE i.edition_id = ? AND i.issue_date = ? $statusSql ORDER BY p.page_number",
                   [$ed['id'], $ctx['issue']['issue_date']])->fetchAll();
@@ -112,25 +187,57 @@ function issue_pages(int $issueId): array
 }
 
 /**
- * Page-jump menu for the whole group: the main edition's full page list, then each
- * sub-edition / supplement that has its OWN pages (e.g. a local page 11), under its
- * own heading. Returns [ ['edition'=>row, 'pages'=>[{page_number,page_label,section}]] ].
+ * Page-jump menu for the whole group:
+ *   - the MAIN edition lists the full paper (every page number — common pages plus its
+ *     own version of any local page), and
+ *   - each sub-edition lists ONLY its differing (local) pages, e.g. its own page 11.
+ * Returns [ ['edition'=>row, 'pages'=>[pageRow,...]] ], main first.
  */
 function group_page_nav(array $ctx): array
 {
     if (empty($ctx['issue']) || empty($ctx['group_editions'])) {
         return [];
     }
-    $date = $ctx['issue']['issue_date'];
-    $statusSql = can_preview() ? '' : "AND i.status = 'published'";
+    $map       = group_page_map($ctx);
+    $owners    = $map['owners'];
+    $pagesByEd = $map['pages'];
+    $eds       = $map['eds'];
+    $mainId    = (int)($ctx['main_edition']['id'] ?? 0);
+    if (!$mainId || !isset($eds[$mainId])) {
+        $mainId = (int)$ctx['group_editions'][0]['id'];
+    }
+
     $out = [];
+
+    // 1) Main: the whole paper — every page number, using the main's own version of a
+    //    local page, else the page's owner.
+    $mainPages = [];
+    foreach ($owners as $n => $ownerIds) {
+        $srcId = (page_is_local($owners, $n) && isset($pagesByEd[$mainId][$n])) ? $mainId : $ownerIds[0];
+        if (isset($pagesByEd[$srcId][$n])) {
+            $mainPages[$n] = $pagesByEd[$srcId][$n];
+        }
+    }
+    ksort($mainPages);
+    if ($mainPages) {
+        $out[] = ['edition' => $eds[$mainId] ?? $ctx['main_edition'], 'pages' => array_values($mainPages)];
+    }
+
+    // 2) Each sub-edition: only the page numbers it has its OWN (local) file for.
     foreach ($ctx['group_editions'] as $ge) {
-        $rows = q("SELECT p.page_number, p.page_label, p.section, p.source_file
-                   FROM pages p JOIN issues i ON i.id = p.issue_id
-                   WHERE i.edition_id = ? AND i.issue_date = ? $statusSql
-                   ORDER BY p.page_number", [$ge['id'], $date])->fetchAll();
-        if ($rows) {
-            $out[] = ['edition' => $ge, 'pages' => $rows];
+        $gid = (int)$ge['id'];
+        if ($gid === $mainId) {
+            continue;
+        }
+        $subPages = [];
+        foreach (($pagesByEd[$gid] ?? []) as $n => $p) {
+            if (page_is_local($owners, $n)) {
+                $subPages[$n] = $p;
+            }
+        }
+        ksort($subPages);
+        if ($subPages) {
+            $out[] = ['edition' => $ge, 'pages' => array_values($subPages)];
         }
     }
     return $out;

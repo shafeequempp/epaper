@@ -9,9 +9,12 @@ function admin_header(string $title, string $active = ''): void
         'upload'   => ['Upload pages', url('admin/upload.php')],
         'editions' => ['Editions', url('admin/editions.php')],
     ];
-    if ($u && in_array($u['role'], ['editor', 'admin'], true)) {
-        $nav['watermark'] = ['Watermark', url('admin/watermark.php')];
-    }
+    // Watermark menu hidden from the nav (the feature still applies via config.php
+    // 'watermark'; the page is still reachable directly at admin/watermark.php).
+    // To bring the menu back, uncomment the block below.
+    // if ($u && in_array($u['role'], ['editor', 'admin'], true)) {
+    //     $nav['watermark'] = ['Watermark', url('admin/watermark.php')];
+    // }
     if ($u && $u['role'] === 'admin') {
         $nav['plans']       = ['Plans', url('admin/plans.php')];
         $nav['subscribers'] = ['Subscribers', url('admin/subscribers.php')];
@@ -52,4 +55,39 @@ function admin_header(string $title, string $active = ''): void
 function admin_footer(): void
 {
     echo "</main>\n</body>\n</html>";
+}
+
+/**
+ * Publish or unpublish every edition of one paper (a date + district group, or a single
+ * standalone edition). Only issues that have pages are published. Returns a flash message,
+ * or null when the request is not valid. Caller must already require the 'editor' role.
+ */
+function publish_date_group(string $action, string $date, string $groupName, int $editionId): ?string
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return null;
+    }
+    if ($groupName !== '') {
+        $scope = 'e.group_name = ?';
+        $sp = [$groupName];
+    } else {
+        $scope = 'i.edition_id = ?';
+        $sp = [$editionId];
+    }
+    if ($action === 'publish_group') {
+        q("UPDATE issues i JOIN editions e ON e.id = i.edition_id
+           SET i.status = 'published', i.published_at = NOW()
+           WHERE i.issue_date = ? AND $scope AND i.status <> 'published'
+             AND EXISTS (SELECT 1 FROM pages p WHERE p.issue_id = i.id)",
+          array_merge([$date], $sp));
+        return 'Published every edition that has pages for ' . fmt_date($date) . '.';
+    }
+    if ($action === 'unpublish_group') {
+        q("UPDATE issues i JOIN editions e ON e.id = i.edition_id
+           SET i.status = 'draft', i.published_at = NULL
+           WHERE i.issue_date = ? AND $scope AND i.status = 'published'",
+          array_merge([$date], $sp));
+        return 'Unpublished every edition for ' . fmt_date($date) . '.';
+    }
+    return null;
 }

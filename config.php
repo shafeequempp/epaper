@@ -36,7 +36,11 @@ return [
         'enabled'        => true,   // false = whole reader stays open; account/subscribe pages still work
         'free_latest'    => true,   // the newest published date per edition is free to everyone
         'free_downloads' => false,  // allow "Download page" on the free latest issue
+        // What a signed-in but NOT-subscribed reader (i.e. inside the free trial) may do:
+        'trial_archive'   => false, // false = they can open only the latest day; true = any past day too
+        'trial_downloads' => false, // false = they cannot download article images; true = they can
     ],
+    'trial_days' => 7,              // free days a reader gets from their first login (0 = no trial)
     // Razorpay keys: dashboard.razorpay.com -> Settings -> API Keys. Empty = payments disabled
     // (accounts and the admin still work; the Subscribe button shows a "not configured" notice).
     'razorpay' => [

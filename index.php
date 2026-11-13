@@ -5,6 +5,7 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/reader.php';
 require __DIR__ . '/inc/reader_layout.php';
 
+reader_gate();
 $ctx = resolve_issue();
 $pages = $ctx['issue'] ? edition_pages($ctx) : [];
 reader_header($ctx, 'thumbs', $ctx['edition'] ? $ctx['edition']['name'] : '');
@@ -19,7 +20,10 @@ if (!$ctx['issue']) {
   <?php if (!can_read_ctx($ctx)): ?>
     <p class="locked-note">
       <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-      This is a past edition. <a href="<?= h(url('subscribe.php', !empty($ctx['main_edition']) ? ['e' => $ctx['main_edition']['slug']] : [])) ?>">Subscribe<?= !empty($ctx['main_edition']) ? ' to ' . h($ctx['main_edition']['name']) : '' ?></a> to open full pages, article text and downloads.
+      <?php if (trial_is_over_for_current()): ?>
+        Your 7-day free trial is over.
+      <?php endif; ?>
+      <a href="<?= h(url('subscribe.php', !empty($ctx['main_edition']) ? ['e' => $ctx['main_edition']['slug']] : [])) ?>">Subscribe<?= !empty($ctx['main_edition']) ? ' to ' . h($ctx['main_edition']['name']) : '' ?></a> to open full pages, article text and downloads.
     </p>
   <?php endif; ?>
   <ol class="thumbs">

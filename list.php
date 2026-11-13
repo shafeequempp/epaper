@@ -5,6 +5,7 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/reader.php';
 require __DIR__ . '/inc/reader_layout.php';
 
+reader_gate();
 $ctx = resolve_issue();
 $pages = $ctx['issue'] ? edition_pages($ctx) : [];
 reader_header($ctx, 'list', $ctx['edition'] ? $ctx['edition']['name'] : '');

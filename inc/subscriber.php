@@ -16,7 +16,7 @@ function current_subscriber(): ?array
     if (!$s) {
         return null;
     }
-    $row = q('SELECT id, email, name, phone, status, email_verified_at FROM subscribers WHERE id = ?', [$s['id']])->fetch();
+    $row = q('SELECT id, email, name, phone, status, email_verified_at, trial_started_at FROM subscribers WHERE id = ?', [$s['id']])->fetch();
     if (!$row || $row['status'] !== 'active') {
         unset($_SESSION['subscriber']);
         return null;
@@ -29,6 +29,50 @@ function subscriber_login(array $row): void
 {
     session_regenerate_id(true);
     $_SESSION['subscriber'] = ['id' => (int)$row['id'], 'email' => $row['email'], 'name' => $row['name']];
+
+    // Start the free trial on the very first login.
+    if (empty($row['trial_started_at'])) {
+        q("UPDATE subscribers SET trial_started_at = NOW() WHERE id = ? AND trial_started_at IS NULL", [(int)$row['id']]);
+    }
+    // Record every login.
+    q("INSERT INTO login_logs (subscriber_id, ip, user_agent) VALUES (?, ?, ?)", [
+        (int)$row['id'],
+        substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45),
+        substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
+    ]);
+}
+
+// ---------------------------------------------------------------- free trial
+
+/** How many free days a reader gets from their first login. Configurable in config.php. */
+function trial_days(): int
+{
+    $v = cfg('trial_days');
+    return $v !== null ? max(0, (int)$v) : 7;
+}
+
+/** The reader's trial start (first login), or null if they have never logged in. */
+function subscriber_trial_start(int $subscriberId): ?string
+{
+    $t = q('SELECT trial_started_at FROM subscribers WHERE id = ?', [$subscriberId])->fetchColumn();
+    return $t ?: null;
+}
+
+/** Is the reader still inside their free-trial window? */
+function subscriber_trial_active(int $subscriberId): bool
+{
+    $t = subscriber_trial_start($subscriberId);
+    if ($t === null || trial_days() <= 0) {
+        return false;
+    }
+    return (strtotime($t) + trial_days() * 86400) > time();
+}
+
+/** When the free trial ends (Y-m-d H:i:s), or null if not started. */
+function subscriber_trial_ends(int $subscriberId): ?string
+{
+    $t = subscriber_trial_start($subscriberId);
+    return $t === null ? null : date('Y-m-d H:i:s', strtotime($t) + trial_days() * 86400);
 }
 
 function subscriber_logout(): void
@@ -162,6 +206,34 @@ function subscriber_has_access_to(array $edition): bool
     return in_array(main_edition_id_of($edition), $cov['mains'], true);
 }
 
+/** Price of one archive (single old date) purchase, in paise. Configurable via config.php. */
+function archive_price_paise(): int
+{
+    $v = cfg('archive_price_paise');
+    return $v !== null ? (int)$v : 2500;   // ₹25 default
+}
+
+/** Has the signed-in reader bought this one old date of this edition's group (Archives)? */
+function subscriber_bought_archive(int $mainEditionId, string $date): bool
+{
+    $s = current_subscriber();
+    if ($s === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return false;
+    }
+    return (bool)q("SELECT 1 FROM archive_purchases
+                    WHERE subscriber_id = ? AND edition_id = ? AND issue_date = ? AND status = 'paid'
+                    LIMIT 1", [(int)$s['id'], $mainEditionId, $date])->fetchColumn();
+}
+
+/** True when the reader has an archive purchase that unlocks this reader context's date. */
+function ctx_archive_ok(array $ctx): bool
+{
+    if (empty($ctx['edition']) || empty($ctx['issue']['issue_date'])) {
+        return false;
+    }
+    return subscriber_bought_archive(main_edition_id_of($ctx['edition']), (string)$ctx['issue']['issue_date']);
+}
+
 function paywall_enabled(): bool
 {
     $pw = cfg('paywall') ?: [];
@@ -204,20 +276,48 @@ function ctx_issue_is_free(array $ctx): bool
     return $dates && $d !== null && $d === $dates[0];
 }
 
-/** Staff preview and free issues are always readable; otherwise a subscription covering this edition is needed. */
-function can_read_ctx(array $ctx): bool
+/** May a NOT-subscribed trial reader open past days? Config: paywall.trial_archive. */
+function trial_archive_allowed(): bool
 {
-    if (function_exists('can_preview') && can_preview()) {
-        return true;
-    }
-    if (ctx_issue_is_free($ctx)) {
-        return true;
-    }
-    return !empty($ctx['edition']) && subscriber_has_access_to($ctx['edition']);
+    $pw = cfg('paywall') ?: [];
+    return !empty($pw['trial_archive']);
 }
 
-/** Whether the "Download page" link is allowed for the current viewer/issue. */
-function can_download_ctx(array $ctx): bool
+/** May a NOT-subscribed trial reader download article images? Config: paywall.trial_downloads. */
+function trial_downloads_allowed(): bool
+{
+    $pw = cfg('paywall') ?: [];
+    return !empty($pw['trial_downloads']);
+}
+
+/** Is this the newest published date for the edition's group (i.e. "today's paper")? */
+function is_latest_issue_date(array $edition, string $date): bool
+{
+    $group = (string)($edition['group_name'] ?? '');
+    if ($group !== '') {
+        $max = q("SELECT MAX(i.issue_date) FROM issues i JOIN editions e ON e.id = i.edition_id
+                  WHERE e.group_name = ? AND i.status = 'published'", [$group])->fetchColumn();
+    } else {
+        $max = q("SELECT MAX(issue_date) FROM issues WHERE edition_id = ? AND status = 'published'", [(int)$edition['id']])->fetchColumn();
+    }
+    return $max !== null && $max !== false && $date === $max;
+}
+
+/** A paid reader: subscribed to this edition, or bought this exact date. */
+function reader_is_paid(?array $edition, ?string $date): bool
+{
+    if (!empty($edition) && subscriber_has_access_to($edition)) {
+        return true;
+    }
+    return !empty($edition) && $date !== null && subscriber_bought_archive(main_edition_id_of($edition), $date);
+}
+
+/**
+ * READ gate. The paper is for signed-in readers. A paid reader reads anything they cover.
+ * A trial (not-subscribed) reader reads only the latest day, unless paywall.trial_archive
+ * allows past days too. Staff preview always passes; paywall off = open site.
+ */
+function reader_can_access(?array $edition, ?string $date): bool
 {
     if (function_exists('can_preview') && can_preview()) {
         return true;
@@ -225,22 +325,80 @@ function can_download_ctx(array $ctx): bool
     if (!paywall_enabled()) {
         return true;
     }
-    if (!empty($ctx['edition']) && subscriber_has_access_to($ctx['edition'])) {
+    $s = current_subscriber();
+    if ($s === null) {
+        return false;                                  // must be signed in
+    }
+    if (reader_is_paid($edition, $date)) {
         return true;
     }
-    return ctx_issue_is_free($ctx) && paywall_free_downloads();
+    if (subscriber_trial_active((int)$s['id'])) {
+        if (!empty($edition) && $date !== null && is_latest_issue_date($edition, $date)) {
+            return true;                               // today's paper during the trial
+        }
+        return trial_archive_allowed();                // past days only if config allows
+    }
+    return false;
 }
 
-function can_read_article(array $article): bool
+/** DOWNLOAD gate. Paid readers always; trial readers only if paywall.trial_downloads is on. */
+function reader_can_download(?array $edition, ?string $date): bool
 {
     if (function_exists('can_preview') && can_preview()) {
         return true;
     }
-    if (date_is_free((string)$article['edition_slug'], (string)$article['issue_date'])) {
+    if (!paywall_enabled()) {
         return true;
     }
-    $ed = q('SELECT * FROM editions WHERE slug = ?', [(string)$article['edition_slug']])->fetch();
-    return $ed ? subscriber_has_access_to($ed) : false;
+    $s = current_subscriber();
+    if ($s === null) {
+        return false;
+    }
+    if (reader_is_paid($edition, $date)) {
+        return true;
+    }
+    if (subscriber_trial_active((int)$s['id'])) {
+        return trial_downloads_allowed() && reader_can_access($edition, $date);
+    }
+    return false;
+}
+
+function can_read_ctx(array $ctx): bool
+{
+    return reader_can_access($ctx['edition'] ?? null, $ctx['issue']['issue_date'] ?? null);
+}
+
+/** Whether downloads are allowed for the current viewer/issue. */
+function can_download_ctx(array $ctx): bool
+{
+    return reader_can_download($ctx['edition'] ?? null, $ctx['issue']['issue_date'] ?? null);
+}
+
+function can_read_article(array $article): bool
+{
+    $ed = q('SELECT * FROM editions WHERE slug = ?', [(string)$article['edition_slug']])->fetch() ?: null;
+    return reader_can_access($ed, (string)$article['issue_date']);
+}
+
+/** Whether the current reader may download this article's image. */
+function can_download_article(array $article): bool
+{
+    $ed = q('SELECT * FROM editions WHERE slug = ?', [(string)$article['edition_slug']])->fetch() ?: null;
+    return reader_can_download($ed, (string)$article['issue_date']);
+}
+
+/** True when the signed-in reader's free trial has ended and they hold no paid access. */
+function trial_is_over_for_current(): bool
+{
+    $s = current_subscriber();
+    if ($s === null) {
+        return false;
+    }
+    if (subscriber_trial_start((int)$s['id']) === null || subscriber_trial_active((int)$s['id'])) {
+        return false;   // never started, or still running
+    }
+    $cov = subscriber_coverage((int)$s['id']);
+    return !$cov['all'] && !$cov['mains'];   // no subscription at all
 }
 
 // ---------------------------------------------------------------- plan helpers
@@ -300,6 +458,38 @@ function plan_cycle_label(array $plan): string
     $n = max(1, (int)$plan['interval_count']);
     $unit = ['daily' => 'day', 'weekly' => 'week', 'monthly' => 'month', 'yearly' => 'year'][$plan['period']] ?? 'month';
     return $n === 1 ? $unit : "$n {$unit}s";
+}
+
+/** How many days one paid cycle of this plan lasts (for "Valid for N days"). */
+function plan_validity_days(array $plan): int
+{
+    $n = max(1, (int)$plan['interval_count']);
+    $per = ['daily' => 1, 'weekly' => 7, 'monthly' => 30, 'yearly' => 365][$plan['period']] ?? 30;
+    return $n * $per;
+}
+
+/** Cost per day in paise, for comparing plans. */
+function plan_per_day_paise(array $plan): float
+{
+    $days = max(1, plan_validity_days($plan));
+    return (int)$plan['amount_paise'] / $days;
+}
+
+/**
+ * Savings versus the most expensive-per-day plan in the list (usually the shortest one).
+ * Returns a whole percentage; 0 for the baseline plan (no badge shown).
+ */
+function plan_savings_pct(array $plan, array $allPlans): int
+{
+    $baseline = 0.0;
+    foreach ($allPlans as $p) {
+        $baseline = max($baseline, plan_per_day_paise($p));
+    }
+    if ($baseline <= 0) {
+        return 0;
+    }
+    $pct = (1 - plan_per_day_paise($plan) / $baseline) * 100;
+    return $pct < 1 ? 0 : (int)round($pct);
 }
 
 // ---------------------------------------------------------------- redirect helpers

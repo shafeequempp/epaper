@@ -5,6 +5,7 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/reader.php';
 require __DIR__ . '/inc/reader_layout.php';
 
+reader_gate();
 $a = load_article((int)($_GET['id'] ?? 0));
 if ($a) {
     // Stay in the reader's edition when the story comes from a page it shares (e.g. Ernakulam pages
@@ -60,6 +61,12 @@ if (!can_read_article($a)) {
       <a href="<?= h(rlink('article.php', $ctx, ['id' => $a['id']])) ?>" aria-pressed="<?= $mode === 'image' ? 'true' : 'false' ?>">As printed</a>
       <a href="<?= h(rlink('article.php', $ctx, ['id' => $a['id'], 'mode' => 'text'])) ?>" aria-pressed="<?= $mode === 'text' ? 'true' : 'false' ?>">Text</a>
     </div>
+    <?php if ($a['regions'] && can_download_article($a)): ?>
+      <a class="story__dl" href="<?= h(url('dl_article.php', ['id' => $a['id']])) ?>">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M5 21h14"/></svg>
+        Download image
+      </a>
+    <?php endif; ?>
   </header>
 
   <?php if ($mode === 'image'): ?>

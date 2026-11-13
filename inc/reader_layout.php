@@ -38,6 +38,7 @@ function reader_header(array $ctx, string $view, string $title = '', array $meta
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anek+Malayalam:wght@400;500;600;700&family=Noto+Serif+Malayalam:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="<?= h(url('assets/epaper.css')) ?>?v=<?= @filemtime(__DIR__ . '/../assets/epaper.css') ?>">
+<script src="<?= h(url('assets/noinspect.js')) ?>?v=<?= (int)@filemtime(__DIR__ . '/../assets/noinspect.js') ?>" defer></script>
 </head>
 <body class="view-<?= h($view) ?>">
 <a class="skip" href="#main">Skip to the paper</a>
@@ -206,14 +207,17 @@ function paywall_block(string $peek = '', array $edition = []): void
     if ($peek !== '') {
         echo '<img class="paywall__peek" src="' . h(media($peek)) . '" alt="" aria-hidden="true">';
     }
+    $trialOver = function_exists('trial_is_over_for_current') && trial_is_over_for_current();
     echo '<div class="paywall__card">'
        . '<svg class="paywall__lock" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7">'
        . '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>'
-       . '<h2>' . ($edName !== '' ? h($edName) . ' is for subscribers' : 'This edition is for subscribers') . '</h2>'
-       . '<p>Today\'s paper is free for everyone. '
-       . ($edName !== ''
-            ? 'Subscribe to <strong>' . h($edName) . '</strong> to open its full archive, all its local sub-editions and supplements, article text and page downloads.'
-            : 'Subscribe to open this and the full archive — every past edition, article text and page downloads.')
+       . '<h2>' . ($trialOver ? 'Your free period is over' : ($edName !== '' ? h($edName) . ' is for subscribers' : 'This edition is for subscribers')) . '</h2>'
+       . '<p>'
+       . ($trialOver
+            ? 'Your 7-day free trial has ended. Subscribe to keep reading' . ($edName !== '' ? ' <strong>' . h($edName) . '</strong>' : '') . ' — the full archive, article text and page downloads.'
+            : ($edName !== ''
+                ? 'Subscribe to <strong>' . h($edName) . '</strong> to open its full archive, all its local sub-editions and supplements, article text and page downloads.'
+                : 'Subscribe to open this and the full archive — every past edition, article text and page downloads.'))
        . '</p>'
        . '<div class="paywall__actions">'
        . '<a class="pw-btn pw-btn--primary" href="' . h($subUrl) . '">'

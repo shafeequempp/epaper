@@ -102,6 +102,26 @@ function rzp_cancel_subscription(string $subscriptionId, bool $atCycleEnd): arra
     ]);
 }
 
+/** Create a one-time Order (for an archive / single old-issue purchase). Returns the order entity. */
+function rzp_create_order(int $amountPaise, array $notes = [], string $currency = 'INR'): array
+{
+    return rzp_request('POST', 'orders', [
+        'amount'   => max(100, $amountPaise),
+        'currency' => $currency,
+        'notes'    => $notes,
+    ]);
+}
+
+/**
+ * Verify the signature Checkout returns after an Order is paid.
+ * For orders the signed string is order_id + '|' + payment_id.
+ */
+function rzp_verify_order_signature(string $orderId, string $paymentId, string $signature): bool
+{
+    $expected = hash_hmac('sha256', $orderId . '|' . $paymentId, rzp_cfg('key_secret'));
+    return hash_equals($expected, $signature);
+}
+
 /**
  * Verify the signature Checkout returns after the reader authorises a subscription.
  * For subscriptions the signed string is payment_id + '|' + subscription_id.

@@ -18,6 +18,7 @@
     var panel = root.querySelector('.panel');
     var body = panel.querySelector('.panel__body');
     var openLink = panel.querySelector('.panel__open');
+    var dlLink = panel.querySelector('.panel__dl');
     var api = root.getAttribute('data-api');
     var preview = root.getAttribute('data-preview') === '1';
     var ratio = +sheet.getAttribute('data-h') / +sheet.getAttribute('data-w');
@@ -111,6 +112,10 @@
 
     function render(a) {
       openLink.href = a.url;
+      if (dlLink) {
+        if (mode === 'image' && a.download) { dlLink.href = a.download; dlLink.hidden = false; }
+        else { dlLink.hidden = true; }
+      }
       var html = '';
       if (mode === 'image') {
         a.images.forEach(function (im) {

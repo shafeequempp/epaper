@@ -4,6 +4,7 @@ require __DIR__ . '/inc/bootstrap.php';
 require __DIR__ . '/inc/reader.php';
 require __DIR__ . '/inc/reader_layout.php';
 
+reader_gate();
 $ctx = resolve_issue();
 $q = trim((string)($_GET['q'] ?? ''));
 $all = !empty($_GET['all']);

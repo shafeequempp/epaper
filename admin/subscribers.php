@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/../inc/bootstrap.php';
 require __DIR__ . '/../inc/admin_layout.php';
+require __DIR__ . '/../inc/razorpay.php';
 
 require_login('admin');
 
@@ -49,6 +50,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
            WHERE subscriber_id = ? AND source = 'manual'
              AND status = 'manual' AND (current_end IS NULL OR current_end > NOW())", [$id]);
         flash('Manual access revoked.');
+    } elseif ($action === 'cancel_sub') {
+        // cancel one specific subscription (any source)
+        $subRow = q('SELECT * FROM subscriptions WHERE id = ? AND subscriber_id = ?',
+                    [(int)($_POST['sub_id'] ?? 0), $id])->fetch();
+        if ($subRow) {
+            if ($subRow['source'] === 'razorpay' && !empty($subRow['razorpay_subscription_id']) && razorpay_enabled()) {
+                try { rzp_cancel_subscription((string)$subRow['razorpay_subscription_id'], false); } catch (Throwable $e) { /* local cancel still applies */ }
+            }
+            q("UPDATE subscriptions SET status = 'cancelled', current_end = NOW() WHERE id = ?", [(int)$subRow['id']]);
+            flash('Subscription cancelled.');
+        } else {
+            flash('Subscription not found.', 'error');
+        }
+    } elseif ($action === 'extend_sub') {
+        $days = max(1, (int)($_POST['days'] ?? 0));
+        $subRow = q('SELECT * FROM subscriptions WHERE id = ? AND subscriber_id = ?',
+                    [(int)($_POST['sub_id'] ?? 0), $id])->fetch();
+        if ($subRow) {
+            // extend from the later of now or the current end
+            q("UPDATE subscriptions
+               SET current_end = DATE_ADD(GREATEST(COALESCE(current_end, NOW()), NOW()), INTERVAL ? DAY),
+                   status = CASE WHEN status IN ('cancelled','expired') THEN 'manual' ELSE status END
+               WHERE id = ?", [$days, (int)$subRow['id']]);
+            flash("Extended by $days days.");
+        } else {
+            flash('Subscription not found.', 'error');
+        }
     }
     $q = trim((string)($_GET['q'] ?? ''));
     redirect(url('admin/subscribers.php', $q !== '' ? ['q' => $q] : []));
@@ -61,7 +89,7 @@ if ($search !== '') {
 } else {
     $subs = q('SELECT * FROM subscribers ORDER BY created_at DESC LIMIT 200')->fetchAll();
 }
-$plans = q('SELECT id, name FROM plans ORDER BY sort_order')->fetchAll();
+$plans = q('SELECT * FROM plans ORDER BY sort_order')->fetchAll();
 $mains = main_editions();
 $total = (int)q('SELECT COUNT(*) FROM subscribers')->fetchColumn();
 $activeCount = (int)q("SELECT COUNT(DISTINCT subscriber_id) FROM subscriptions
@@ -94,10 +122,23 @@ admin_header('Subscribers', 'subscribers');
       <td>
         <?php if ($acts): ?>
           <?php foreach ($acts as $act): ?>
-            <div>
+            <div class="a-sub-item">
               <strong><?= h($act['edition_name'] ?: 'All editions') ?></strong>
               <span class="a-muted"><?= h($act['plan_name']) ?><?= $act['source'] === 'manual' ? ' · manual' : '' ?></span><br>
               <span class="a-muted"><?= !empty($act['current_end']) ? 'until ' . h(date('j M Y', strtotime($act['current_end']))) : 'no expiry' ?><?= $act['cancel_at_period_end'] ? ', not renewing' : '' ?></span>
+              <div class="a-sub-item__acts">
+                <form method="post" class="a-inline"><?= csrf_field() ?>
+                  <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+                  <input type="hidden" name="sub_id" value="<?= (int)$act['id'] ?>">
+                  <input type="hidden" name="days" value="30">
+                  <button class="a-link" name="action" value="extend_sub">+30 days</button>
+                </form>
+                <form method="post" class="a-inline"><?= csrf_field() ?>
+                  <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+                  <input type="hidden" name="sub_id" value="<?= (int)$act['id'] ?>">
+                  <button class="a-link" name="action" value="cancel_sub" onclick="return confirm('Cancel this subscription now?')">Cancel</button>
+                </form>
+              </div>
             </div>
           <?php endforeach; ?>
         <?php else: ?>
@@ -117,9 +158,9 @@ admin_header('Subscribers', 'subscribers');
                 </select>
               </label>
               <label>Plan
-                <select name="plan_id"><?php foreach ($plans as $pl): ?><option value="<?= (int)$pl['id'] ?>"><?= h($pl['name']) ?></option><?php endforeach; ?></select>
+                <select name="plan_id" class="js-plan"><?php foreach ($plans as $pl): ?><option value="<?= (int)$pl['id'] ?>" data-days="<?= (int)plan_validity_days($pl) ?>"><?= h($pl['name']) ?> (<?= (int)plan_validity_days($pl) ?>d)</option><?php endforeach; ?></select>
               </label>
-              <label>Days (0 = no expiry) <input name="days" type="number" min="0" value="30" style="width:6rem"></label>
+              <label>Days (0 = no expiry) <input name="days" type="number" min="0" value="<?= $plans ? (int)plan_validity_days($plans[0]) : 30 ?>" class="js-days" style="width:6rem"></label>
               <label style="flex-basis:100%">Note <input name="note" placeholder="Complimentary"></label>
               <button class="a-btn" name="action" value="grant">Grant access</button>
             </form>
@@ -141,4 +182,15 @@ admin_header('Subscribers', 'subscribers');
   <?php if (!$subs): ?><tr><td colspan="5" class="a-muted">No subscribers<?= $search !== '' ? ' match that search' : ' yet' ?>.</td></tr><?php endif; ?>
   </tbody>
 </table>
+<script>
+// Grant form: picking a plan fills in its validity (admin can still override).
+document.querySelectorAll('.js-plan').forEach(function (sel) {
+  sel.addEventListener('change', function () {
+    var opt = sel.options[sel.selectedIndex];
+    var days = opt && opt.getAttribute('data-days');
+    var box = sel.closest('form').querySelector('.js-days');
+    if (box && days != null) box.value = days;
+  });
+});
+</script>
 <?php admin_footer();

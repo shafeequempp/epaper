@@ -60,4 +60,53 @@
   document.querySelectorAll('.js-subscribe').forEach(function (btn) {
     btn.addEventListener('click', function () { start(btn); });
   });
+
+  // ---- Archives: buy one old issue date via a one-time Order ----
+  function startArchive(button) {
+    var card = button.closest('.archive-card');
+    var ed = card.querySelector('.archive-ed');
+    var dt = card.querySelector('.archive-date');
+    if (!dt.value) { alert('Pick a date first.'); dt.focus(); return; }
+
+    button.disabled = true;
+    var original = button.textContent;
+    button.textContent = 'Starting…';
+
+    post(C.archiveUrl, { edition: ed.value, date: dt.value, csrf: C.csrf })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.body && res.body.error ? res.body.error : 'Could not start checkout.');
+        var d = res.body;
+        var rzp = new Razorpay({
+          key: d.key_id,
+          order_id: d.order_id,
+          amount: d.amount,
+          currency: 'INR',
+          name: d.name,
+          description: d.description,
+          prefill: d.prefill || C.prefill,
+          theme: { color: '#C4161C' },
+          handler: function (resp) {
+            var form = document.getElementById('rzp-archive-callback');
+            form.querySelector('[name="razorpay_order_id"]').value = resp.razorpay_order_id || '';
+            form.querySelector('[name="razorpay_payment_id"]').value = resp.razorpay_payment_id || '';
+            form.querySelector('[name="razorpay_signature"]').value = resp.razorpay_signature || '';
+            form.submit();
+          },
+          modal: { ondismiss: function () { button.disabled = false; button.textContent = original; } }
+        });
+        rzp.on('payment.failed', function (resp) {
+          alert('Payment failed: ' + (resp.error && resp.error.description ? resp.error.description : 'please try again.'));
+          button.disabled = false; button.textContent = original;
+        });
+        rzp.open();
+      })
+      .catch(function (err) {
+        alert(err.message || 'Something went wrong. Please try again.');
+        button.disabled = false; button.textContent = original;
+      });
+  }
+
+  document.querySelectorAll('.js-buy-archive').forEach(function (btn) {
+    btn.addEventListener('click', function () { startArchive(btn); });
+  });
 })();

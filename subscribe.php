@@ -22,12 +22,13 @@ if ($wanted !== '') {
 
 $coverage   = $sub ? subscriber_coverage((int)$sub['id']) : ['all' => false, 'mains' => []];
 $alreadyHas = $selMain && ($coverage['all'] || in_array((int)$selMain['id'], $coverage['mains'], true));
+$archivePaise = archive_price_paise();
 
 account_header('Subscribe');
 ?>
 <div class="acc-plans">
   <div class="acc-plans__head">
-    <h1>Subscribe to your edition</h1>
+    <h1>Subscription plans</h1>
     <p class="acc-sub">Today's paper is free for everyone. A subscription unlocks the full archive of your chosen edition — all its local sub-editions and supplements, article text and page downloads.</p>
   </div>
 
@@ -61,43 +62,87 @@ account_header('Subscribe');
   <?php if (!$plans): ?>
     <p class="acc-sub">No plans are available right now.</p>
   <?php else: ?>
-  <div class="acc-plan-grid">
-    <?php foreach ($plans as $p): ?>
-      <div class="acc-plan">
-        <h2><?= h($p['name']) ?></h2>
-        <p class="acc-plan__price"><?= h(money_inr((int)$p['amount_paise'])) ?><span>/ <?= h(plan_cycle_label($p)) ?></span></p>
-        <p class="acc-plan__desc"><?= h($selMain ? $selMain['name'] . ' edition' : '') ?><?= $p['description'] ? ' · ' . h($p['description']) : '' ?></p>
-        <?php if (!$sub): ?>
-          <a class="acc-btn acc-btn--primary" href="<?= h(url('account/login.php', ['next' => url('subscribe.php', ['e' => $selMain['slug'] ?? ''])])) ?>">Sign in to subscribe</a>
-        <?php elseif ($alreadyHas): ?>
-          <button class="acc-btn" disabled>Already subscribed</button>
-        <?php elseif (!$ready): ?>
-          <button class="acc-btn" disabled>Unavailable</button>
-        <?php else: ?>
-          <button class="acc-btn acc-btn--primary js-subscribe"
-                  data-plan="<?= h($p['slug']) ?>"
-                  data-edition="<?= h($selMain['slug'] ?? '') ?>">Subscribe</button>
-        <?php endif; ?>
+  <div class="plan-grid">
+    <?php foreach ($plans as $p):
+        $days = plan_validity_days($p);
+        $save = plan_savings_pct($p, $plans);
+    ?>
+      <div class="plan-card">
+        <h2 class="plan-card__name"><?= h($p['name']) ?></h2>
+        <p class="plan-card__price"><?= h(money_inr((int)$p['amount_paise'])) ?><span>/edition</span></p>
+        <p class="plan-card__valid">Valid for <?= (int)$days ?> days</p>
+        <div class="plan-card__badge-row">
+          <?php if ($save > 0): ?><span class="plan-card__save">Save <?= (int)$save ?>%</span><?php endif; ?>
+        </div>
+        <div class="plan-card__cta">
+          <?php if (!$sub): ?>
+            <a class="acc-btn" href="<?= h(url('account/login.php', ['next' => url('subscribe.php', ['e' => $selMain['slug'] ?? ''])])) ?>">Subscribe</a>
+          <?php elseif ($alreadyHas): ?>
+            <button class="acc-btn" disabled>Subscribed</button>
+          <?php elseif (!$ready): ?>
+            <button class="acc-btn" disabled>Unavailable</button>
+          <?php else: ?>
+            <button class="acc-btn js-subscribe"
+                    data-plan="<?= h($p['slug']) ?>"
+                    data-edition="<?= h($selMain['slug'] ?? '') ?>">Subscribe</button>
+          <?php endif; ?>
+        </div>
       </div>
     <?php endforeach; ?>
   </div>
   <?php endif; ?>
+
+  <!-- ---- Archives: buy a single old issue date ---- -->
+  <div class="archive-card">
+    <div class="archive-card__text">
+      <h2>Archives (Old Issues)</h2>
+      <p>Get a copy of any one old issue in digital format — just the day you need.</p>
+    </div>
+    <form class="archive-card__form" onsubmit="return false">
+      <select class="archive-ed" aria-label="Edition">
+        <?php foreach ($mains as $m): ?>
+          <option value="<?= h($m['slug']) ?>"<?= $selMain && (int)$m['id'] === (int)$selMain['id'] ? ' selected' : '' ?>><?= h($m['name']) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <input class="archive-date" type="date" aria-label="Date" max="<?= h(date('Y-m-d')) ?>">
+    </form>
+    <div class="archive-card__price">
+      <strong><?= h(money_inr($archivePaise)) ?></strong><span>/day (per edition)</span>
+    </div>
+    <div class="archive-card__cta">
+      <?php if (!$sub): ?>
+        <a class="acc-btn" href="<?= h(url('account/login.php', ['next' => url('subscribe.php')])) ?>">Subscribe</a>
+      <?php elseif (!$ready): ?>
+        <button class="acc-btn" disabled>Unavailable</button>
+      <?php else: ?>
+        <button class="acc-btn js-buy-archive">Subscribe</button>
+      <?php endif; ?>
+    </div>
+  </div>
+
   <?php endif; ?>
 
   <p class="acc-fineprint">Payments are processed securely by Razorpay. Auto-renewal can be turned off any time from your account.</p>
 </div>
 
-<?php if ($sub && $ready && !$alreadyHas && $selMain): ?>
+<?php if ($sub && $ready): ?>
 <form id="rzp-callback" method="post" action="<?= h(url('account/subscribe_callback.php')) ?>" hidden>
   <?= csrf_field() ?>
   <input type="hidden" name="razorpay_payment_id">
   <input type="hidden" name="razorpay_subscription_id">
   <input type="hidden" name="razorpay_signature">
 </form>
+<form id="rzp-archive-callback" method="post" action="<?= h(url('account/archive_callback.php')) ?>" hidden>
+  <?= csrf_field() ?>
+  <input type="hidden" name="razorpay_order_id">
+  <input type="hidden" name="razorpay_payment_id">
+  <input type="hidden" name="razorpay_signature">
+</form>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
   window.EPAPER_SUBSCRIBE = {
     checkoutUrl: <?= json_encode(url('api/checkout.php')) ?>,
+    archiveUrl:  <?= json_encode(url('api/checkout_archive.php')) ?>,
     csrf: <?= json_encode(csrf_token()) ?>,
     keyId: <?= json_encode(rzp_cfg('key_id')) ?>,
     siteName: <?= json_encode((string)cfg('site_name')) ?>,

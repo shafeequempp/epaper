@@ -16,6 +16,7 @@ function account_header(string $title, bool $wide = false): void
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anek+Malayalam:wght@400;500;600;700&family=Noto+Serif+Malayalam:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="<?= h(url('assets/epaper.css')) ?>?v=<?= @filemtime(__DIR__ . '/../assets/epaper.css') ?>">
 <link rel="stylesheet" href="<?= h(url('assets/account.css')) ?>?v=<?= @filemtime(__DIR__ . '/../assets/account.css') ?>">
+<script src="<?= h(url('assets/noinspect.js')) ?>?v=<?= (int)@filemtime(__DIR__ . '/../assets/noinspect.js') ?>" defer></script>
 </head>
 <body class="acc-body">
 <header class="bar">
