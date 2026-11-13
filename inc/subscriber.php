@@ -6,6 +6,8 @@ declare(strict_types=1);
  * Readers are stored in `subscribers`, entirely separate from staff `users`.
  */
 
+require_once __DIR__ . '/editions.php';   // main_edition_of(), main_edition_id_of(), main_editions()
+
 // ---------------------------------------------------------------- accounts
 
 function current_subscriber(): ?array
@@ -104,11 +106,60 @@ function has_active_subscription(int $subscriberId): bool
     return active_subscription($subscriberId) !== null;
 }
 
-/** True when the signed-in reader (if any) currently has access. */
+/** True when the signed-in reader (if any) currently has ANY active subscription. */
 function subscriber_has_access(): bool
 {
     $s = current_subscriber();
     return $s !== null && has_active_subscription((int)$s['id']);
+}
+
+/** All currently-active subscriptions of a reader (with plan + covered-edition info). */
+function active_subscriptions(int $subscriberId): array
+{
+    return q("SELECT s.*, p.name AS plan_name, p.amount_paise, p.currency, p.period, p.interval_count,
+                     e.slug AS edition_slug, e.name AS edition_name, e.group_name AS edition_group
+              FROM subscriptions s
+              JOIN plans p ON p.id = s.plan_id
+              LEFT JOIN editions e ON e.id = s.edition_id
+              WHERE s.subscriber_id = ?
+                AND (
+                     (s.status IN ('active','authenticated') AND s.current_end IS NOT NULL AND s.current_end > NOW())
+                  OR (s.source = 'manual' AND (s.current_end IS NULL OR s.current_end > NOW()))
+                )
+              ORDER BY s.current_end IS NULL DESC, s.current_end DESC", [$subscriberId])->fetchAll();
+}
+
+/**
+ * What a reader can currently read: ['all' => bool, 'mains' => int[]].
+ * 'all' is true when they hold an all-access (edition_id IS NULL) subscription;
+ * 'mains' lists the main-edition ids of their per-edition subscriptions.
+ */
+function subscriber_coverage(int $subscriberId): array
+{
+    $all = false;
+    $mains = [];
+    foreach (active_subscriptions($subscriberId) as $s) {
+        if ($s['edition_id'] === null) {
+            $all = true;
+        } else {
+            $mains[(int)$s['edition_id']] = true;
+        }
+    }
+    return ['all' => $all, 'mains' => array_keys($mains)];
+}
+
+/** Does the signed-in reader have paid access to this edition (via its group's main edition)? */
+function subscriber_has_access_to(array $edition): bool
+{
+    $s = current_subscriber();
+    if ($s === null) {
+        return false;
+    }
+    $cov = subscriber_coverage((int)$s['id']);
+    if ($cov['all']) {
+        return true;
+    }
+    return in_array(main_edition_id_of($edition), $cov['mains'], true);
 }
 
 function paywall_enabled(): bool
@@ -153,13 +204,16 @@ function ctx_issue_is_free(array $ctx): bool
     return $dates && $d !== null && $d === $dates[0];
 }
 
-/** Staff preview and free issues are always readable; otherwise an active subscription is needed. */
+/** Staff preview and free issues are always readable; otherwise a subscription covering this edition is needed. */
 function can_read_ctx(array $ctx): bool
 {
     if (function_exists('can_preview') && can_preview()) {
         return true;
     }
-    return ctx_issue_is_free($ctx) || subscriber_has_access();
+    if (ctx_issue_is_free($ctx)) {
+        return true;
+    }
+    return !empty($ctx['edition']) && subscriber_has_access_to($ctx['edition']);
 }
 
 /** Whether the "Download page" link is allowed for the current viewer/issue. */
@@ -171,7 +225,7 @@ function can_download_ctx(array $ctx): bool
     if (!paywall_enabled()) {
         return true;
     }
-    if (subscriber_has_access()) {
+    if (!empty($ctx['edition']) && subscriber_has_access_to($ctx['edition'])) {
         return true;
     }
     return ctx_issue_is_free($ctx) && paywall_free_downloads();
@@ -185,7 +239,8 @@ function can_read_article(array $article): bool
     if (date_is_free((string)$article['edition_slug'], (string)$article['issue_date'])) {
         return true;
     }
-    return subscriber_has_access();
+    $ed = q('SELECT * FROM editions WHERE slug = ?', [(string)$article['edition_slug']])->fetch();
+    return $ed ? subscriber_has_access_to($ed) : false;
 }
 
 // ---------------------------------------------------------------- plan helpers

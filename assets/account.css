@@ -61,3 +61,7 @@
 @media (max-width: 560px) {
   .acc-card { padding: 20px; }
 }
+
+/* Subscribe: edition chooser */
+.acc-ed-pick { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: 0 0 1rem; }
+.acc-ed-pick select { font: inherit; padding: .5rem .6rem; border: 1px solid var(--acc-line, #d8dce2); border-radius: 8px; min-width: 240px; max-width: 100%; }

@@ -44,7 +44,8 @@ if (!can_read_article($a)) {
        . h($a['edition_name_ml'] ?: $a['edition_name']) . ', ' . h(fmt_date($a['issue_date'])) . '</p></header>';
     echo '<div class="story__text"><h1>' . h($a['headline']) . '</h1><p>' . h(excerpt($a['body'], 300)) . '</p></div>';
     echo '</article>';
-    paywall_block($a['regions'][0]['img'] ?? '');
+    $artEd = q('SELECT * FROM editions WHERE slug = ?', [(string)$a['edition_slug']])->fetch();
+    paywall_block($a['regions'][0]['img'] ?? '', $artEd ? main_edition_of($artEd) : []);
     reader_footer();
     exit;
 }

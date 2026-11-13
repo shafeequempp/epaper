@@ -48,9 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$active = active_subscription((int)$sub['id']);
-$all = q('SELECT s.*, p.name AS plan_name FROM subscriptions s JOIN plans p ON p.id = s.plan_id
-          WHERE s.subscriber_id = ? ORDER BY s.created_at DESC', [(int)$sub['id']])->fetchAll();
+$actives = active_subscriptions((int)$sub['id']);
 $payments = q('SELECT * FROM payments WHERE subscriber_id = ? ORDER BY created_at DESC LIMIT 50', [(int)$sub['id']])->fetchAll();
 
 account_header('My account', true);
@@ -61,16 +59,18 @@ verify_banner($sub);
     <h1>Hello, <?= h($sub['name'] ?: $sub['email']) ?></h1>
     <p class="acc-sub"><?= h($sub['email']) ?></p>
 
-    <?php if ($active): ?>
+    <?php if ($actives): ?>
+      <?php foreach ($actives as $active): ?>
       <div class="acc-status acc-status--on">
         <div>
           <span class="acc-badge acc-badge--on">Active</span>
-          <strong><?= h($active['plan_name']) ?></strong>
-          <?php if ($active['source'] === 'manual'): ?>
-            <span class="acc-muted">(granted by admin)</span>
-          <?php endif; ?>
+          <strong><?= h($active['edition_name'] ?: 'All editions') ?></strong>
+          <span class="acc-muted"><?= h($active['plan_name']) ?><?= $active['source'] === 'manual' ? ' · granted by admin' : '' ?></span>
         </div>
         <p>
+          <?= $active['edition_name']
+                ? 'Covers ' . h($active['edition_name']) . ', its local sub-editions and supplements. '
+                : 'Covers every edition. ' ?>
           <?php if (!empty($active['current_end'])): ?>
             <?= $active['cancel_at_period_end'] ? 'Access ends on ' : 'Renews on ' ?>
             <strong><?= h(date('j M Y', strtotime($active['current_end']))) ?></strong>.
@@ -85,13 +85,15 @@ verify_banner($sub);
             <button class="acc-btn acc-btn--ghost" name="action" value="cancel">Turn off auto-renewal</button>
           </form>
         <?php elseif ($active['cancel_at_period_end']): ?>
-          <p class="acc-muted">Auto-renewal is off. <a href="<?= h(url('subscribe.php')) ?>">Resubscribe</a> any time.</p>
+          <p class="acc-muted">Auto-renewal is off. <a href="<?= h(url('subscribe.php', $active['edition_slug'] ? ['e' => $active['edition_slug']] : [])) ?>">Resubscribe</a> any time.</p>
         <?php endif; ?>
       </div>
+      <?php endforeach; ?>
+      <p><a class="acc-btn acc-btn--primary" href="<?= h(url('subscribe.php')) ?>">Add another edition</a></p>
     <?php else: ?>
       <div class="acc-status acc-status--off">
         <p><span class="acc-badge">No active subscription</span></p>
-        <p>You can read today's paper for free. Subscribe to open the full archive.</p>
+        <p>You can read today's paper for free. Subscribe to open the full archive of your edition.</p>
         <a class="acc-btn acc-btn--primary" href="<?= h(url('subscribe.php')) ?>">See plans</a>
       </div>
     <?php endif; ?>

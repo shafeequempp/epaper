@@ -22,15 +22,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'grant') {
         $planId = (int)($_POST['plan_id'] ?? 0);
         $days = (int)($_POST['days'] ?? 0);
+        $edId = (int)($_POST['edition_id'] ?? 0);   // 0 = all editions (NULL)
         $plan = q('SELECT id FROM plans WHERE id = ?', [$planId])->fetch();
+        $edName = 'all editions';
+        if ($edId > 0) {
+            $edRow = q('SELECT id, name FROM editions WHERE id = ? AND is_main = 1', [$edId])->fetch();
+            if (!$edRow) {
+                $edId = -1; // signals an invalid edition choice
+            } else {
+                $edName = (string)$edRow['name'];
+            }
+        }
         if (!$plan) {
             flash('Choose a plan to record the grant against.', 'error');
+        } elseif ($edId === -1) {
+            flash('Pick a valid main edition, or choose All editions.', 'error');
         } else {
             $end = $days > 0 ? (new DateTime())->modify("+$days days")->format('Y-m-d H:i:s') : null;
-            q("INSERT INTO subscriptions (subscriber_id, plan_id, status, current_start, current_end, source, note)
-               VALUES (?, ?, 'manual', NOW(), ?, 'manual', ?)",
-              [$id, $planId, $end, trim((string)($_POST['note'] ?? 'Granted by admin'))]);
-            flash($days > 0 ? "Granted $days days of access." : 'Granted indefinite access.');
+            q("INSERT INTO subscriptions (subscriber_id, plan_id, edition_id, status, current_start, current_end, source, note)
+               VALUES (?, ?, ?, 'manual', NOW(), ?, 'manual', ?)",
+              [$id, $planId, ($edId > 0 ? $edId : null), $end, trim((string)($_POST['note'] ?? 'Granted by admin'))]);
+            flash(($days > 0 ? "Granted $days days of access" : 'Granted indefinite access') . ' to ' . $edName . '.');
         }
     } elseif ($action === 'revoke') {
         q("UPDATE subscriptions SET status = 'cancelled', current_end = NOW()
@@ -50,6 +62,7 @@ if ($search !== '') {
     $subs = q('SELECT * FROM subscribers ORDER BY created_at DESC LIMIT 200')->fetchAll();
 }
 $plans = q('SELECT id, name FROM plans ORDER BY sort_order')->fetchAll();
+$mains = main_editions();
 $total = (int)q('SELECT COUNT(*) FROM subscribers')->fetchColumn();
 $activeCount = (int)q("SELECT COUNT(DISTINCT subscriber_id) FROM subscriptions
     WHERE (status IN ('active','authenticated') AND current_end > NOW())
@@ -69,7 +82,7 @@ admin_header('Subscribers', 'subscribers');
 <table class="a-table">
   <thead><tr><th>Name / e-mail</th><th>Joined</th><th>Verified</th><th>Access</th><th>Actions</th></tr></thead>
   <tbody>
-  <?php foreach ($subs as $s): $act = active_subscription((int)$s['id']); ?>
+  <?php foreach ($subs as $s): $acts = active_subscriptions((int)$s['id']); ?>
     <tr>
       <td>
         <strong><?= h($s['name'] ?: '—') ?></strong>
@@ -79,10 +92,14 @@ admin_header('Subscribers', 'subscribers');
       <td><?= h(date('j M Y', strtotime($s['created_at']))) ?></td>
       <td><?= $s['email_verified_at'] ? 'Yes' : '<span class="a-muted">No</span>' ?></td>
       <td>
-        <?php if ($act): ?>
-          <strong><?= h($act['plan_name']) ?></strong>
-          <?= $act['source'] === 'manual' ? '<span class="a-muted">(manual)</span>' : '' ?><br>
-          <span class="a-muted"><?= !empty($act['current_end']) ? 'until ' . h(date('j M Y', strtotime($act['current_end']))) : 'no expiry' ?><?= $act['cancel_at_period_end'] ? ', not renewing' : '' ?></span>
+        <?php if ($acts): ?>
+          <?php foreach ($acts as $act): ?>
+            <div>
+              <strong><?= h($act['edition_name'] ?: 'All editions') ?></strong>
+              <span class="a-muted"><?= h($act['plan_name']) ?><?= $act['source'] === 'manual' ? ' · manual' : '' ?></span><br>
+              <span class="a-muted"><?= !empty($act['current_end']) ? 'until ' . h(date('j M Y', strtotime($act['current_end']))) : 'no expiry' ?><?= $act['cancel_at_period_end'] ? ', not renewing' : '' ?></span>
+            </div>
+          <?php endforeach; ?>
         <?php else: ?>
           <span class="a-muted">none</span>
         <?php endif; ?>
@@ -93,6 +110,12 @@ admin_header('Subscribers', 'subscribers');
           <div class="a-pop">
             <form method="post" class="a-row">
               <?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+              <label>Edition
+                <select name="edition_id">
+                  <option value="0">All editions (full access)</option>
+                  <?php foreach ($mains as $m): ?><option value="<?= (int)$m['id'] ?>"><?= h($m['name']) ?></option><?php endforeach; ?>
+                </select>
+              </label>
               <label>Plan
                 <select name="plan_id"><?php foreach ($plans as $pl): ?><option value="<?= (int)$pl['id'] ?>"><?= h($pl['name']) ?></option><?php endforeach; ?></select>
               </label>

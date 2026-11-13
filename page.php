@@ -24,7 +24,7 @@ reader_header($ctx, 'page', $page ? 'Page ' . $page['page_label'] : '');
 if (!$page) {
     no_issue($ctx);
 } elseif (!can_read_ctx($ctx)) {
-    paywall_block($page['img_thumb']);
+    paywall_block($page['img_thumb'], $ctx['main_edition'] ?? ($ctx['edition'] ?? []));
 } else { ?>
 <div class="reader" data-api="<?= h(url('api/article.php')) ?>"<?= can_preview() ? ' data-preview="1"' : '' ?>>
   <aside class="strip" aria-label="Pages">

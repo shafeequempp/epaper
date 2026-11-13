@@ -1,0 +1,10 @@
+To: shafeeque@mpp.co.in
+Subject: Verify your e-mail — Mathrubhumi ePaper
+Date: Thu, 12 Nov 2026 15:19:05 +0530
+
+Welcome to Mathrubhumi ePaper.
+
+Please confirm your e-mail address by opening this link:
+http://localhost/epaper/account/verify.php?token=2d63719e0c91e071050658f1e8d55fe3c2052614b275e55bcfe7525273d41805
+
+The link is valid for 3 days. If you didn't create this account, ignore this message.

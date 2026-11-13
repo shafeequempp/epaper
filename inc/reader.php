@@ -32,8 +32,12 @@ function resolve_issue(): array
         }
     }
     $chain = edition_chain($edition);
-    $ids = array_map(function ($e) { return (int)$e['id']; }, $chain);
-    $in = implode(',', $ids);
+    // Calendar dates: every date ANY edition in this group published, so a main
+    // edition also surfaces dates that exist only under one of its sub-editions.
+    $group = group_editions($edition['group_name'] ?? null);
+    $dateEds = $group ?: $chain;
+    $dateIds = array_map(function ($e) { return (int)$e['id']; }, $dateEds);
+    $in = implode(',', $dateIds ?: [0]);
     $statusSql = can_preview() ? '' : "AND status = 'published'";
     $dates = q("SELECT DISTINCT issue_date FROM issues WHERE edition_id IN ($in) $statusSql ORDER BY issue_date DESC LIMIT 800")
         ->fetchAll(PDO::FETCH_COLUMN);
@@ -52,7 +56,10 @@ function resolve_issue(): array
         $issue = $own ?: ['id' => 0, 'edition_id' => $edition['id'], 'issue_date' => $issue['issue_date']];
     }
     return ['editions' => $editions, 'edition' => $edition, 'issue' => $issue, 'dates' => $dates,
-            'requested_date' => $date, 'chain' => $chain];
+            'requested_date' => $date, 'chain' => $chain,
+            'main_editions' => main_editions(),
+            'main_edition'  => main_edition_of($edition),
+            'group_editions' => group_editions($edition['group_name'] ?? null)];
 }
 
 /**
@@ -66,8 +73,23 @@ function edition_pages(array $ctx): array
         return [];
     }
     $statusSql = can_preview() ? '' : "AND i.status = 'published'";
+    // Where to pull pages from, in priority order (first edition with a given page
+    // number wins). A sub-edition borrows its main's pages (the chain). A main
+    // edition shows its own pages, then fills any page number it lacks from its
+    // group's sub-editions — so a date that exists only under a sub-edition still
+    // renders when the reader is on the main edition.
+    $sources = $ctx['chain'];
+    $cur = $ctx['edition'];
+    if (!empty($cur['is_main']) && !empty($ctx['group_editions'])) {
+        $sources = [$cur];
+        foreach ($ctx['group_editions'] as $ge) {
+            if ((int)$ge['id'] !== (int)$cur['id']) {
+                $sources[] = $ge;
+            }
+        }
+    }
     $byNumber = [];
-    foreach ($ctx['chain'] as $level => $ed) {
+    foreach ($sources as $level => $ed) {
         $rows = q("SELECT p.* FROM pages p JOIN issues i ON i.id = p.issue_id
                    WHERE i.edition_id = ? AND i.issue_date = ? $statusSql ORDER BY p.page_number",
                   [$ed['id'], $ctx['issue']['issue_date']])->fetchAll();
@@ -87,6 +109,48 @@ function edition_pages(array $ctx): array
 function issue_pages(int $issueId): array
 {
     return q('SELECT * FROM pages WHERE issue_id = ? ORDER BY page_number', [$issueId])->fetchAll();
+}
+
+/**
+ * Page-jump menu for the whole group: the main edition's full page list, then each
+ * sub-edition / supplement that has its OWN pages (e.g. a local page 11), under its
+ * own heading. Returns [ ['edition'=>row, 'pages'=>[{page_number,page_label,section}]] ].
+ */
+function group_page_nav(array $ctx): array
+{
+    if (empty($ctx['issue']) || empty($ctx['group_editions'])) {
+        return [];
+    }
+    $date = $ctx['issue']['issue_date'];
+    $statusSql = can_preview() ? '' : "AND i.status = 'published'";
+    $out = [];
+    foreach ($ctx['group_editions'] as $ge) {
+        $rows = q("SELECT p.page_number, p.page_label, p.section, p.source_file
+                   FROM pages p JOIN issues i ON i.id = p.issue_id
+                   WHERE i.edition_id = ? AND i.issue_date = ? $statusSql
+                   ORDER BY p.page_number", [$ge['id'], $date])->fetchAll();
+        if ($rows) {
+            $out[] = ['edition' => $ge, 'pages' => $rows];
+        }
+    }
+    return $out;
+}
+
+/**
+ * The section name shown next to a page number ("Local News", "Editorial", "Sports").
+ * Uses the stored section, else the suffix of the source file name
+ * ("12pg6e-Editorial.indd" -> "Editorial"); plain pages default to "News".
+ */
+function page_section_text(array $p): string
+{
+    if (!empty($p['section'])) {
+        return (string)$p['section'];
+    }
+    $src = (string)($p['source_file'] ?? '');
+    if (preg_match('/^\d{1,2}pg\d+[a-z0-9]+[-_ ]+(.+?)\.indd$/i', $src, $m)) {
+        return trim($m[1]);
+    }
+    return 'News';
 }
 
 /** Articles of a page with their regions, for hotspots and headline lists. */

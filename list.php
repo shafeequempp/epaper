@@ -12,7 +12,7 @@ reader_header($ctx, 'list', $ctx['edition'] ? $ctx['edition']['name'] : '');
 if (!$ctx['issue']) {
     no_issue($ctx);
 } elseif (!can_read_ctx($ctx)) {
-    paywall_block($pages[0]['img_thumb'] ?? '');
+    paywall_block($pages[0]['img_thumb'] ?? '', $ctx['main_edition'] ?? ($ctx['edition'] ?? []));
 } else {
     foreach ($pages as $p):
         $arts = page_articles((int)$p['id']); ?>

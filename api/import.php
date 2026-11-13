@@ -14,9 +14,9 @@
  * Replies with JSON: { "ok": true, ... } or { "ok": false, "error": "..." }
  */
 declare(strict_types=1);
-require __DIR__ . '/../inc/bootstrap.php';
-require __DIR__ . '/../inc/importer.php';
-require __DIR__ . '/../inc/editions.php';
+require_once __DIR__ . '/../inc/bootstrap.php';
+require_once __DIR__ . '/../inc/importer.php';
+require_once __DIR__ . '/../inc/editions.php';
 
 header('Content-Type: application/json; charset=utf-8');
 

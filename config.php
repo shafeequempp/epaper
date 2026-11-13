@@ -40,8 +40,8 @@ return [
     // Razorpay keys: dashboard.razorpay.com -> Settings -> API Keys. Empty = payments disabled
     // (accounts and the admin still work; the Subscribe button shows a "not configured" notice).
     'razorpay' => [
-        'key_id'         => '',   // rzp_test_... while testing, rzp_live_... in production
-        'key_secret'     => '',
+        'key_id'         => 'rzp_test_URDvR1WBNSgHxX',   // rzp_test_... while testing, rzp_live_... in production
+        'key_secret'     => 'ig1t0h5LMz4Ye62NaDbUJSR6',
         'webhook_secret' => '',   // a secret you choose; set the same value in the Razorpay webhook
     ],
     // Outgoing e-mail for verification and password-reset links (PHP mail()).

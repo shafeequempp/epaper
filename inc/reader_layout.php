@@ -46,26 +46,75 @@ function reader_header(array $ctx, string $view, string $title = '', array $meta
     <span class="brand__name">Mathrubhumi</span><span class="brand__sub">ePaper</span>
   </a>
 
-  <?php $stay = ['list' => 'list.php', 'page' => 'page.php'][$view] ?? 'index.php'; // keep the reader's view when the date changes ?>
-  <form class="pick" method="get" action="<?= h(url($stay)) ?>">
-    <?php if (can_preview()): ?><input type="hidden" name="preview" value="1"><?php endif; ?>
-    <label class="sr" for="pick-e">Edition</label>
-    <select id="pick-e" name="e" onchange="this.form.d.value='';this.form.submit()">
-      <?php $group = null; foreach ($ctx['editions'] as $e):
-        if ($e['group_name'] !== $group): if ($group !== null) echo '</optgroup>'; $group = $e['group_name']; ?>
-        <optgroup label="<?= h($group ?: 'Other') ?>">
-      <?php endif; ?>
-        <option value="<?= h($e['slug']) ?>"<?= $ctx['edition'] && $e['id'] === $ctx['edition']['id'] ? ' selected' : '' ?>>
-          <?= h($e['name_ml'] ? $e['name_ml'] . ' (' . $e['name'] . ')' : $e['name']) ?></option>
-      <?php endforeach; if ($group !== null) echo '</optgroup>'; ?>
-    </select>
-    <label class="sr" for="pick-d">Date</label>
-    <?php $cur = $ctx['issue']['issue_date'] ?? ($ctx['dates'][0] ?? ''); ?>
-    <input id="pick-d" class="pick-date" type="date" name="d" value="<?= h($cur) ?>"
-      min="<?= h($ctx['dates'] ? end($ctx['dates']) : '') ?>" max="<?= h($ctx['dates'][0] ?? '') ?>"
-      data-dates="<?= h(json_encode(array_values($ctx['dates']))) ?>"<?= $ctx['dates'] ? '' : ' disabled' ?>
-      onchange="this.form.submit()">
-  </form>
+  <?php
+    $stay = ['list' => 'list.php', 'page' => 'page.php'][$view] ?? 'index.php'; // keep the reader's view
+    $pv  = can_preview() ? ['preview' => 1] : [];
+    $cur = $ctx['issue']['issue_date'] ?? ($ctx['dates'][0] ?? '');
+    $mainEd = $ctx['main_edition'] ?? $ctx['edition'];
+    $groupEds = $ctx['group_editions'] ?? [];
+    $nav = !empty($ctx['issue']) ? group_page_nav($ctx) : [];
+    $curPage = (int)($_GET['p'] ?? 0);
+    $curEdId = (int)($ctx['edition']['id'] ?? 0);
+    $curNavLabel = '';
+    foreach ($nav as $g) {
+        if ((int)$g['edition']['id'] !== $curEdId) { continue; }
+        foreach ($g['pages'] as $pp) {
+            if ((int)$pp['page_number'] === $curPage) {
+                $curNavLabel = sprintf('%02d', $curPage) . ': ' . page_section_text($pp);
+            }
+        }
+    }
+  ?>
+  <div class="pick">
+    <label class="sr">Edition</label>
+    <button type="button" class="pick-ed-btn" data-ed-open aria-haspopup="dialog" aria-expanded="false" aria-controls="ed-modal">
+      <svg class="pick-ed-btn__pin" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+      <span class="pick-ed-btn__name"><?= h($mainEd ? ($mainEd['name_ml'] ?: $mainEd['name']) : 'Edition') ?></span>
+      <svg class="pick-ed-btn__caret" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <noscript>
+      <select class="pick-ed" aria-label="Edition" onchange="if(this.value)location.href=this.value">
+        <?php foreach (($ctx['main_editions'] ?? []) as $m):
+          $sel = $mainEd && (int)$m['id'] === (int)$mainEd['id']; ?>
+          <option value="<?= h(url($stay, ['e' => $m['slug']] + $pv)) ?>"<?= $sel ? ' selected' : '' ?>><?= h(edition_label($m)) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </noscript>
+
+    <?php if ($nav): ?>
+      <div class="pagenav">
+        <button type="button" class="pagenav__btn" data-pagenav-open aria-haspopup="true" aria-expanded="false" aria-controls="pagenav-pop">
+          <svg class="pagenav__ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
+          <span class="pagenav__cur"><?= h($curNavLabel ?: 'Pages') ?></span>
+          <svg class="pagenav__caret" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="pagenav__pop" id="pagenav-pop" role="menu" hidden>
+          <?php foreach ($nav as $g): $ge = $g['edition'];
+            $gtag = !empty($ge['is_main']) ? '' : (!empty($ge['is_supplement']) ? ' · supplement' : ' · local'); ?>
+            <div class="pagenav__group"><?= h($ge['name_ml'] ?: $ge['name']) ?><?= h($gtag) ?></div>
+            <?php foreach ($g['pages'] as $pp):
+              $isCur = (int)$ge['id'] === $curEdId && (int)$pp['page_number'] === $curPage; ?>
+              <a class="pagenav__item<?= $isCur ? ' is-cur' : '' ?>" role="menuitem"
+                 href="<?= h(url('page.php', ['e' => $ge['slug'], 'd' => $cur, 'p' => $pp['page_number']] + $pv)) ?>"<?= $isCur ? ' aria-current="page"' : '' ?>>
+                <span class="pagenav__no"><?= h(sprintf('%02d', (int)$pp['page_number'])) ?></span>
+                <span class="pagenav__sec"><?= h(page_section_text($pp)) ?></span>
+              </a>
+            <?php endforeach; ?>
+          <?php endforeach; ?>
+        </div>
+      </div>
+    <?php endif; ?>
+
+    <form class="pick-dateform" method="get" action="<?= h(url($stay)) ?>">
+      <?php foreach ($pv as $k => $v): ?><input type="hidden" name="<?= h($k) ?>" value="<?= h($v) ?>"><?php endforeach; ?>
+      <input type="hidden" name="e" value="<?= h($ctx['edition']['slug'] ?? '') ?>">
+      <label class="sr" for="pick-d">Date</label>
+      <input id="pick-d" class="pick-date" type="date" name="d" value="<?= h($cur) ?>"
+        min="<?= h($ctx['dates'] ? end($ctx['dates']) : '') ?>" max="<?= h($ctx['dates'][0] ?? '') ?>"
+        data-dates="<?= h(json_encode(array_values($ctx['dates']))) ?>"<?= $ctx['dates'] ? '' : ' disabled' ?>
+        onchange="this.form.submit()">
+    </form>
+  </div>
 
   <?php if ($ctx['issue']): ?>
   <nav class="views" aria-label="View">
@@ -82,19 +131,48 @@ function reader_header(array $ctx, string $view, string $title = '', array $meta
     <input id="find-q" name="q" type="search" placeholder="വാർത്ത തിരയുക / Search" value="<?= h($_GET['q'] ?? '') ?>">
   </form>
 
-  <?php $sub = current_subscriber(); ?>
+  <?php
+    $sub = current_subscriber();
+    $subUrl = url('subscribe.php', !empty($ctx['main_edition']) ? ['e' => $ctx['main_edition']['slug']] : []);
+    $needsSub = !empty($ctx['edition'])
+        ? !subscriber_has_access_to($ctx['edition'])
+        : !($sub && has_active_subscription((int)$sub['id']));
+  ?>
   <div class="acct">
     <?php if ($sub): ?>
-      <?php if (!has_active_subscription((int)$sub['id'])): ?>
-        <a class="acct__btn" href="<?= h(url('subscribe.php')) ?>">Subscribe</a>
+      <?php if ($needsSub): ?>
+        <a class="acct__btn" href="<?= h($subUrl) ?>">Subscribe</a>
       <?php endif; ?>
       <a class="acct__link" href="<?= h(url('account/index.php')) ?>"><?= h($sub['name'] ? explode(' ', trim($sub['name']))[0] : 'Account') ?></a>
     <?php else: ?>
       <a class="acct__link" href="<?= h(url('account/login.php')) ?>">Sign in</a>
-      <a class="acct__btn" href="<?= h(url('subscribe.php')) ?>">Subscribe</a>
+      <a class="acct__btn" href="<?= h($subUrl) ?>">Subscribe</a>
     <?php endif; ?>
   </div>
 </header>
+<?php if (!empty($ctx['main_editions'])): ?>
+<div class="ed-modal" id="ed-modal" hidden>
+  <div class="ed-modal__overlay" data-ed-close></div>
+  <div class="ed-modal__panel" role="dialog" aria-modal="true" aria-label="Choose an edition">
+    <div class="ed-modal__bar">
+      <h2 class="ed-modal__title">Choose edition</h2>
+      <button type="button" class="ed-modal__close" data-ed-close aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="ed-grid">
+      <?php foreach ($ctx['main_editions'] as $m):
+        $sel = $mainEd && (int)$m['id'] === (int)$mainEd['id']; ?>
+        <a class="ed-grid__item<?= $sel ? ' is-current' : '' ?>" href="<?= h(url($stay, ['e' => $m['slug']] + $pv)) ?>"<?= $sel ? ' aria-current="true"' : '' ?>>
+          <span class="ed-grid__name"><?= h($m['name_ml'] ?: $m['name']) ?></span>
+          <?php if ($m['name_ml']): ?><span class="ed-grid__en"><?= h($m['name']) ?></span><?php endif; ?>
+          <?php if ($sel): ?><svg class="ed-grid__check" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 12 5 5 9-10"/></svg><?php endif; ?>
+        </a>
+      <?php endforeach; ?>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 <?php if (can_preview()): ?><p class="preview-note">Preview: you are seeing unpublished pages.</p><?php endif; ?>
 <main id="main">
 <?php
@@ -119,9 +197,11 @@ function view_icon(string $key): string
  * Paywall for a locked (archived) issue, page or article. $peek is an optional
  * storage-relative image (a thumbnail) shown faint behind the card as a teaser.
  */
-function paywall_block(string $peek = ''): void
+function paywall_block(string $peek = '', array $edition = []): void
 {
     $sub = current_subscriber();
+    $edName  = $edition ? (string)($edition['name'] ?? '') : '';
+    $subUrl  = url('subscribe.php', $edition && !empty($edition['slug']) ? ['e' => $edition['slug']] : []);
     echo '<section class="paywall">';
     if ($peek !== '') {
         echo '<img class="paywall__peek" src="' . h(media($peek)) . '" alt="" aria-hidden="true">';
@@ -129,10 +209,15 @@ function paywall_block(string $peek = ''): void
     echo '<div class="paywall__card">'
        . '<svg class="paywall__lock" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7">'
        . '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>'
-       . '<h2>This edition is for subscribers</h2>'
-       . '<p>Today\'s paper is free for everyone. Subscribe to open this and the full archive — every past edition, article text and page downloads.</p>'
+       . '<h2>' . ($edName !== '' ? h($edName) . ' is for subscribers' : 'This edition is for subscribers') . '</h2>'
+       . '<p>Today\'s paper is free for everyone. '
+       . ($edName !== ''
+            ? 'Subscribe to <strong>' . h($edName) . '</strong> to open its full archive, all its local sub-editions and supplements, article text and page downloads.'
+            : 'Subscribe to open this and the full archive — every past edition, article text and page downloads.')
+       . '</p>'
        . '<div class="paywall__actions">'
-       . '<a class="pw-btn pw-btn--primary" href="' . h(url('subscribe.php')) . '">See plans</a>';
+       . '<a class="pw-btn pw-btn--primary" href="' . h($subUrl) . '">'
+       . ($edName !== '' ? 'Subscribe to ' . h($edName) : 'See plans') . '</a>';
     if (!$sub) {
         $next = $_SERVER['REQUEST_URI'] ?? '';
         echo '<a class="pw-btn pw-btn--ghost" href="' . h(url('account/login.php', ['next' => $next])) . '">Sign in</a>';

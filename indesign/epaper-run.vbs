@@ -68,13 +68,27 @@ Const idJavascript = 1246973031   ' ScriptLanguage.JAVASCRIPT
 WScript.Echo "ePaper: exporting and uploading pages for " & today & " ..."
 WScript.Echo "         folder: " & pageDir
 On Error Resume Next
-idApp.DoScript code, idJavascript, args
+Dim summary
+summary = idApp.DoScript(code, idJavascript, args)
 If Err.Number <> 0 Then
     Dim m : m = Err.Description
     On Error GoTo 0
     Fail "InDesign could not run the export:" & vbCrLf & m
 End If
 On Error GoTo 0
+
+' ---- show the script's own summary (uploads, missing fonts, failures) ----
+If Len(summary & "") > 0 Then
+    WScript.Echo ""
+    WScript.Echo summary
+End If
+
+' ---- a run with upload or export problems is NOT a clean success ---------
+If InStr(summary & "", "Upload problems") > 0 Or InStr(summary & "", "COULD NOT EXPORT") > 0 Then
+    WScript.Echo ""
+    WScript.Echo "ePaper: finished WITH PROBLEMS - some pages did not upload. See the summary above."
+    WScript.Quit 1   ' no success marker -> the .bat reports a problem
+End If
 
 ' ---- mark success so the caller knows it really worked -------------------
 WriteStatus

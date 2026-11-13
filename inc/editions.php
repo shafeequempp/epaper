@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+// Load guard: on Windows, require_once does not always dedupe the same file when
+// it is reached through different path spellings (e.g. api/../inc/editions.php vs
+// inc/editions.php), which would redeclare these functions. This makes a second
+// include a no-op no matter how it is spelled.
+if (defined('EPAPER_EDITIONS_LOADED')) {
+    return;
+}
+define('EPAPER_EDITIONS_LOADED', true);
+
 /**
  * Finds the edition for a file-name code (9pg2e-... -> "E").
  * Two codes are shared by two editions in the edition list (WKN, MK). Those are settled by the
@@ -75,4 +84,63 @@ function edition_chain(array $edition): array
 function edition_chain_ids(array $edition): array
 {
     return array_map(function ($e) { return (int)$e['id']; }, edition_chain($edition));
+}
+
+// ---------------------------------------------------------------- edition groups
+// A "group" (group_name, e.g. "Kozhikode") has one main edition (is_main = 1), any
+// number of local sub-editions (inherit their main's missing pages) and supplements.
+// The reader picks a main edition; a subscription to that main edition covers the
+// whole group.
+
+/** The main edition of each district/group — what the reader's edition picker shows. */
+function main_editions(): array
+{
+    return q('SELECT * FROM editions WHERE is_active = 1 AND is_main = 1
+              ORDER BY group_sort, sort_order, name')->fetchAll();
+}
+
+/** Every active edition in a group, ordered main → sub-editions → supplements. */
+function group_editions(?string $groupName): array
+{
+    if ($groupName === null || $groupName === '') {
+        return [];
+    }
+    return q('SELECT * FROM editions WHERE is_active = 1 AND group_name = ?
+              ORDER BY is_main DESC, is_supplement ASC, sort_order, name', [$groupName])->fetchAll();
+}
+
+/** The main edition of the group this edition belongs to (itself if it is the main). */
+function main_edition_of(array $edition): array
+{
+    if (!empty($edition['is_main'])) {
+        return $edition;
+    }
+    $group = $edition['group_name'] ?? null;
+    if ($group) {
+        $main = q('SELECT * FROM editions WHERE group_name = ? AND is_main = 1 LIMIT 1', [$group])->fetch();
+        if ($main) {
+            return $main;
+        }
+    }
+    // fall back to the inherit chain if the group has no explicit main
+    if (!empty($edition['inherit_from_id'])) {
+        $parent = q('SELECT * FROM editions WHERE id = ?', [(int)$edition['inherit_from_id']])->fetch();
+        if ($parent && (int)$parent['id'] !== (int)$edition['id']) {
+            return main_edition_of($parent);
+        }
+    }
+    return $edition;
+}
+
+function main_edition_id_of(array $edition): int
+{
+    return (int)main_edition_of($edition)['id'];
+}
+
+/** Display label for an edition: Malayalam name with the English name in brackets. */
+function edition_label(array $edition): string
+{
+    return !empty($edition['name_ml'])
+        ? $edition['name_ml'] . ' (' . $edition['name'] . ')'
+        : (string)$edition['name'];
 }

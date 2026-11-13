@@ -19,7 +19,11 @@
     var original = button.textContent;
     button.textContent = 'Starting…';
 
-    post(C.checkoutUrl, { plan: button.getAttribute('data-plan'), csrf: C.csrf })
+    post(C.checkoutUrl, {
+      plan: button.getAttribute('data-plan'),
+      edition: button.getAttribute('data-edition') || '',
+      csrf: C.csrf
+    })
       .then(function (res) {
         if (!res.ok) throw new Error(res.body && res.body.error ? res.body.error : 'Could not start checkout.');
         var d = res.body;

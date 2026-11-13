@@ -78,7 +78,7 @@ try {
 
     var opts = (EPAPER_BATCH && EPAPER_BATCH.folder) ? optsFromBatch(EPAPER_BATCH) : showDialog();
     if (!opts) return;
-    run(opts);
+    return run(opts);   // DoScript hands this summary string back to the launcher
 
     // Build run options from the launcher's arguments, with no dialog.
     function optsFromBatch(a) {
@@ -324,8 +324,16 @@ try {
             msg += "\n\nUpload manifest.json and the JPG files on the dashboard (Upload pages).";
         }
         msg += "\n\nDetails: export_log.txt";
-        alert(msg);
-        if (!opts.batch) outDir.execute();   // don't pop Explorer during an unattended batch run
+        if (opts.batch) {
+            // Unattended one-click run: never pop a blocking dialog (it would freeze the
+            // whole run waiting for a click). Write the summary to a file and return it so
+            // the launcher can print it and tell success from failure.
+            try { writeText(new File(outDir.fsName + "/upload_summary.txt"), msg); } catch (e_sum) {}
+        } else {
+            alert(msg);
+            outDir.execute();
+        }
+        return msg;
     }
 
     // ================================================================ file names and dates

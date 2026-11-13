@@ -19,7 +19,7 @@ if (!$ctx['issue']) {
   <?php if (!can_read_ctx($ctx)): ?>
     <p class="locked-note">
       <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-      This is a past edition. <a href="<?= h(url('subscribe.php')) ?>">Subscribe</a> to open full pages, article text and downloads.
+      This is a past edition. <a href="<?= h(url('subscribe.php', !empty($ctx['main_edition']) ? ['e' => $ctx['main_edition']['slug']] : [])) ?>">Subscribe<?= !empty($ctx['main_edition']) ? ' to ' . h($ctx['main_edition']['name']) : '' ?></a> to open full pages, article text and downloads.
     </p>
   <?php endif; ?>
   <ol class="thumbs">

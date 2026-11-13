@@ -294,3 +294,55 @@
   document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) close(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !pop.hidden) { close(); btn.focus(); } });
 })();
+
+// ------------------------------------------------ Edition picker modal (choose a main edition)
+(function () {
+  var modal = document.getElementById('ed-modal');
+  var opener = document.querySelector('[data-ed-open]');
+  if (!modal || !opener) return;
+  var lastFocus = null;
+
+  function open() {
+    lastFocus = document.activeElement;
+    modal.hidden = false;
+    opener.setAttribute('aria-expanded', 'true');
+    document.body.style.overflow = 'hidden';
+    var f = modal.querySelector('.ed-grid__item.is-current') || modal.querySelector('.ed-grid__item') || modal.querySelector('[data-ed-close]');
+    if (f) f.focus();
+  }
+  function close() {
+    modal.hidden = true;
+    opener.setAttribute('aria-expanded', 'false');
+    document.body.style.overflow = '';
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+
+  opener.addEventListener('click', open);
+  modal.addEventListener('click', function (e) {
+    if (e.target.closest('[data-ed-close]')) { e.preventDefault(); close(); }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !modal.hidden) { e.preventDefault(); close(); }
+  });
+})();
+
+// ------------------------------------------------ Page-jump dropdown (pages + sub-editions)
+(function () {
+  var wrap = document.querySelector('.pagenav');
+  if (!wrap) return;
+  var btn = wrap.querySelector('[data-pagenav-open]');
+  var pop = wrap.querySelector('.pagenav__pop');
+  if (!btn || !pop) return;
+
+  function open() {
+    pop.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    var cur = pop.querySelector('.pagenav__item.is-cur') || pop.querySelector('.pagenav__item');
+    if (cur) cur.scrollIntoView({ block: 'nearest' });
+  }
+  function close() { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+
+  btn.addEventListener('click', function () { pop.hidden ? open() : close(); });
+  document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !pop.hidden) { close(); btn.focus(); } });
+})();

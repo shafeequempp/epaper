@@ -141,8 +141,10 @@ storage/                    generated images (keep writable)
 
 Readers get their own accounts, separate from staff. **Today's paper is free for everyone;** older/archived editions, article text and page downloads need an active subscription. Billing and auto-renewals run through **Razorpay**.
 
+**Subscriptions are per edition.** A reader picks a main edition (e.g. Kozhikode) and that one subscription covers the whole group — the main edition, its local sub-editions (Ramanattukara, Thamarassery…) and its supplements (Weekend, Nagaram…). A reader can hold several edition subscriptions, and admins can grant complimentary access to one edition or to *all* editions. In the reader, the edition picker lists the main editions; once inside one, a second dropdown switches between its sub-editions and supplements.
+
 ### Set up
-1. In phpMyAdmin, import `sql/subscriptions.sql` (adds the subscription tables and two starter plans — Monthly and Annual). Safe to re-run.
+1. In phpMyAdmin, import `sql/subscriptions.sql` (adds the subscription tables and two starter plans — Monthly and Annual), then `sql/subscriptions_editions.sql` (adds per-edition scoping to subscriptions). Both are safe to re-run.
 2. In `config.php` fill in the `razorpay` block:
    - `key_id` / `key_secret` — Razorpay Dashboard → **Settings → API Keys** (use `rzp_test_…` keys while testing).
    - `webhook_secret` — a secret you choose; set the same value in the webhook (next step).
@@ -167,6 +169,7 @@ Until Razorpay keys are set, accounts and the admin all work; the Subscribe butt
 ### Subscription files
 ```
 sql/subscriptions.sql          subscriber, plan, subscription, payment & webhook tables
+sql/subscriptions_editions.sql per-edition scoping (adds subscriptions.edition_id)
 inc/subscriber.php             reader accounts, access checks, the paywall rule
 inc/razorpay.php               Razorpay REST client + signature verification
 inc/mailer.php                 verification / reset e-mail (PHP mail(); logs to storage/_mail)
