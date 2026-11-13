@@ -303,19 +303,74 @@ function is_latest_issue_date(array $edition, string $date): bool
     return $max !== null && $max !== false && $date === $max;
 }
 
-/** A paid reader: subscribed to this edition, or bought this exact date. */
-function reader_is_paid(?array $edition, ?string $date): bool
+/**
+ * Does a PAID subscription window of this reader cover the given issue date?
+ *
+ * Access follows the subscribed period: a paper is readable only when its date falls
+ * inside some subscription's [current_start, current_end] window for this edition's group
+ * (or an all-editions subscription). Windows of every subscription the reader has ever
+ * held — current, extended, cancelled or expired — are unioned, so resubscribing or
+ * extending restores the earlier subscribed dates. A subscription that was never paid
+ * ('created' / 'pending', with no window set) is ignored. Manual admin grants always count
+ * and an open-ended one (no current_end) covers every date from its start.
+ */
+function subscription_covers_date(int $subscriberId, ?array $edition, ?string $date): bool
 {
-    if (!empty($edition) && subscriber_has_access_to($edition)) {
-        return true;
+    if (empty($edition) || $date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return false;
     }
-    return !empty($edition) && $date !== null && subscriber_bought_archive(main_edition_id_of($edition), $date);
+    $mainId = main_edition_id_of($edition);
+    return (bool)q(
+        "SELECT 1 FROM subscriptions
+          WHERE subscriber_id = ?
+            AND (edition_id IS NULL OR edition_id = ?)
+            AND (source = 'manual' OR status NOT IN ('created','pending'))
+            AND current_start IS NOT NULL
+            AND DATE(current_start) <= ?
+            AND (current_end IS NULL OR DATE(current_end) >= ?)
+          LIMIT 1",
+        [$subscriberId, $mainId, $date, $date]
+    )->fetchColumn();
 }
 
 /**
- * READ gate. The paper is for signed-in readers. A paid reader reads anything they cover.
- * A trial (not-subscribed) reader reads only the latest day, unless paywall.trial_archive
- * allows past days too. Staff preview always passes; paywall off = open site.
+ * During an ACTIVE free trial, the reader may read every paper whose date falls inside the
+ * trial window [first-login day .. first-login day + trial_days]. Once the trial has ended
+ * these dates are no longer free (the reader must subscribe). Trial coverage is edition-wide.
+ */
+function trial_covers_date(int $subscriberId, ?string $date): bool
+{
+    if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !subscriber_trial_active($subscriberId)) {
+        return false;
+    }
+    $start = subscriber_trial_start($subscriberId);
+    if ($start === null) {
+        return false;
+    }
+    $startDate = date('Y-m-d', strtotime($start));
+    $endDate   = date('Y-m-d', strtotime($start) + trial_days() * 86400);
+    return $date >= $startDate && $date <= $endDate;
+}
+
+/** A paid reader: a subscription window covers this date, or they bought this exact date. */
+function reader_is_paid(?array $edition, ?string $date): bool
+{
+    $s = current_subscriber();
+    if ($s === null || empty($edition) || $date === null) {
+        return false;
+    }
+    if (subscription_covers_date((int)$s['id'], $edition, $date)) {
+        return true;
+    }
+    return subscriber_bought_archive(main_edition_id_of($edition), $date);
+}
+
+/**
+ * READ gate. The paper is for signed-in readers.
+ *   - a paid reader reads any date inside one of their subscription windows (or bought date);
+ *   - a reader inside their active free trial reads any date inside the trial window.
+ * Once the trial ends, only subscription/archive coverage grants access.
+ * Staff preview always passes; paywall off = open site.
  */
 function reader_can_access(?array $edition, ?string $date): bool
 {
@@ -330,18 +385,12 @@ function reader_can_access(?array $edition, ?string $date): bool
         return false;                                  // must be signed in
     }
     if (reader_is_paid($edition, $date)) {
-        return true;
+        return true;                                   // date inside a subscription window / bought
     }
-    if (subscriber_trial_active((int)$s['id'])) {
-        if (!empty($edition) && $date !== null && is_latest_issue_date($edition, $date)) {
-            return true;                               // today's paper during the trial
-        }
-        return trial_archive_allowed();                // past days only if config allows
-    }
-    return false;
+    return trial_covers_date((int)$s['id'], $date);    // trial papers during the active trial
 }
 
-/** DOWNLOAD gate. Paid readers always; trial readers only if paywall.trial_downloads is on. */
+/** DOWNLOAD gate. Paid readers download their covered dates; trial readers only if paywall.trial_downloads is on. */
 function reader_can_download(?array $edition, ?string $date): bool
 {
     if (function_exists('can_preview') && can_preview()) {
@@ -357,8 +406,8 @@ function reader_can_download(?array $edition, ?string $date): bool
     if (reader_is_paid($edition, $date)) {
         return true;
     }
-    if (subscriber_trial_active((int)$s['id'])) {
-        return trial_downloads_allowed() && reader_can_access($edition, $date);
+    if (trial_covers_date((int)$s['id'], $date)) {
+        return trial_downloads_allowed();              // trial download only when config allows
     }
     return false;
 }

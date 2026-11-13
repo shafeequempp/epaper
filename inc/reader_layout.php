@@ -208,16 +208,29 @@ function paywall_block(string $peek = '', array $edition = []): void
         echo '<img class="paywall__peek" src="' . h(media($peek)) . '" alt="" aria-hidden="true">';
     }
     $trialOver = function_exists('trial_is_over_for_current') && trial_is_over_for_current();
+    // A current member (active trial or active subscription) whose block is only because THIS
+    // date falls outside their covered period — show a date-specific message, not "subscribe".
+    $dateLocked = false;
+    if (!$trialOver && $sub) {
+        $sid = (int)$sub['id'];
+        $cov = function_exists('subscriber_coverage') ? subscriber_coverage($sid) : ['all' => false, 'mains' => []];
+        $isMember = subscriber_trial_active($sid) || !empty($cov['all']) || !empty($cov['mains']);
+        $dateLocked = $isMember;
+    }
     echo '<div class="paywall__card">'
        . '<svg class="paywall__lock" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7">'
        . '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>'
-       . '<h2>' . ($trialOver ? 'Your free period is over' : ($edName !== '' ? h($edName) . ' is for subscribers' : 'This edition is for subscribers')) . '</h2>'
+       . '<h2>' . ($trialOver ? 'Your free period is over'
+            : ($dateLocked ? 'This date is outside your plan'
+            : ($edName !== '' ? h($edName) . ' is for subscribers' : 'This edition is for subscribers'))) . '</h2>'
        . '<p>'
        . ($trialOver
             ? 'Your 7-day free trial has ended. Subscribe to keep reading' . ($edName !== '' ? ' <strong>' . h($edName) . '</strong>' : '') . ' — the full archive, article text and page downloads.'
+            : ($dateLocked
+                ? 'This paper falls outside your subscribed dates. Buy just this date from Archives, or extend your subscription to open it.'
             : ($edName !== ''
                 ? 'Subscribe to <strong>' . h($edName) . '</strong> to open its full archive, all its local sub-editions and supplements, article text and page downloads.'
-                : 'Subscribe to open this and the full archive — every past edition, article text and page downloads.'))
+                : 'Subscribe to open this and the full archive — every past edition, article text and page downloads.')))
        . '</p>'
        . '<div class="paywall__actions">'
        . '<a class="pw-btn pw-btn--primary" href="' . h($subUrl) . '">'
